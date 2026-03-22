@@ -3190,6 +3190,42 @@ const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 window._sb = null;
 try { window._sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); } catch(e) { console.warn('Supabase init failed:', e); }
 
+// ─── SUPABASE REALTIME ───────────────────────────────────────────────────────
+// Subscribes to live changes on shared_state so all users see updates instantly
+var _realtimeChannel = null;
+var _lastPushTime = 0; // prevent echo (ignore updates we just pushed ourselves)
+
+function _startRealtime() {
+  if (!window._sb || _realtimeChannel) return;
+  _realtimeChannel = window._sb
+    .channel('shared_state_changes')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'shared_state' }, function(payload) {
+      // Ignore if we pushed this change ourselves within the last 2 seconds
+      if (Date.now() - _lastPushTime < 2000) return;
+      var data = payload.new;
+      if (!data) return;
+      state.projects = data.projects || [];
+      state.contacts = data.contacts || [];
+      localStorage.setItem('mfg_ci_dashboard', JSON.stringify(state));
+      _applyMigrations();
+      if (typeof renderHome === 'function') renderHome();
+      // Show a subtle toast so users know data refreshed
+      _showSyncToast();
+    })
+    .subscribe();
+}
+
+function _showSyncToast() {
+  var existing = document.getElementById('sync-toast');
+  if (existing) { clearTimeout(existing._timer); existing.remove(); }
+  var toast = document.createElement('div');
+  toast.id = 'sync-toast';
+  toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e293b;color:#94a3b8;font-size:12px;padding:6px 14px;border-radius:20px;z-index:9999;pointer-events:none;border:1px solid #334155;';
+  toast.textContent = '↻ Data updated by another user';
+  document.body.appendChild(toast);
+  toast._timer = setTimeout(function() { toast.remove(); }, 3000);
+}
+
 // ─── SUPABASE SYNC HELPERS ──────────────────────────────────────────────────
 var _syncTimer = null;
 
@@ -3202,6 +3238,7 @@ function _scheduleSbPush() {
 async function _pushStateToSb() {
   if (!window._sb) return;
   try {
+    _lastPushTime = Date.now();
     await window._sb.from('shared_state').upsert({
       id: 1,
       projects: state.projects,
@@ -3444,6 +3481,8 @@ function load() {
         if (p && typeof renderDetail === 'function') renderDetail(p);
       }
     }
+    // Start listening for real-time updates from other users
+    _startRealtime();
   });
 }
 
