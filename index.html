@@ -2029,6 +2029,10 @@
         <label for="re-conf">Confirm Password</label>
         <input type="password" id="re-conf" placeholder="Repeat your password" autocomplete="new-password">
       </div>
+      <div class="ac-field">
+        <label for="re-key">Company Access Key</label>
+        <input type="password" id="re-key" placeholder="Enter company access key" autocomplete="off">
+      </div>
       <button class="ac-btn ac-btn-primary" onclick="authRegister()">Create Account</button>
       <div class="ac-divider">Already have an account?</div>
       <button class="ac-btn ac-btn-ghost" onclick="authShow('screen-login')">Sign In</button>
@@ -2395,14 +2399,34 @@
     var username = document.getElementById('li-user').value.trim();
     var password = document.getElementById('li-pass').value;
     if (!username || !password) { showErr('err-login', 'Please fill in all fields.'); return; }
+    // Rate-limit check (per username)
+    var rlKey = 'login_' + username.toLowerCase();
+    var lockMsg = _rlCheck(rlKey);
+    if (lockMsg) { showErr('err-login', lockMsg); return; }
     var r = await tryApi('/api/login', { username: username, password: password });
     if (r.fromServer) {
-      if (r.ok && r.data.deviceToken) { localStorage.setItem('device_token', r.data.deviceToken); onAuthSuccess(username); }
-      else { showErr('err-login', r.data.message || 'Invalid username or password.'); }
+      if (r.ok && r.data.deviceToken) {
+        _rlSuccess(rlKey);
+        localStorage.setItem('device_token', r.data.deviceToken); onAuthSuccess(username);
+      } else {
+        _rlFail(rlKey);
+        var left = _rlAttemptsLeft(rlKey);
+        var msg = r.data.message || 'Invalid username or password.';
+        if (left > 0 && left <= 3) msg += ' (' + left + ' attempt' + (left !== 1 ? 's' : '') + ' left before lockout)';
+        showErr('err-login', msg);
+      }
     } else {
       var res = await localLogin(username, password);
-      if (res.ok) { localStorage.setItem('device_token', res.deviceToken); onAuthSuccess(username); }
-      else { showErr('err-login', res.message); }
+      if (res.ok) {
+        _rlSuccess(rlKey);
+        localStorage.setItem('device_token', res.deviceToken); onAuthSuccess(username);
+      } else {
+        _rlFail(rlKey);
+        var left2 = _rlAttemptsLeft(rlKey);
+        var msg2 = res.message;
+        if (left2 > 0 && left2 <= 3) msg2 += ' (' + left2 + ' attempt' + (left2 !== 1 ? 's' : '') + ' left before lockout)';
+        showErr('err-login', msg2);
+      }
     }
   };
 
@@ -2412,9 +2436,20 @@
     var username = document.getElementById('re-user').value.trim();
     var password = document.getElementById('re-pass').value;
     var confirm  = document.getElementById('re-conf').value;
+    var accessKey = (document.getElementById('re-key') ? document.getElementById('re-key').value : '');
     if (!username || !password) { showErr('err-reg', 'Please fill in all fields.'); return; }
     if (password !== confirm)   { showErr('err-reg', 'Passwords do not match.');    return; }
     if (password.length < 6)    { showErr('err-reg', 'Password must be at least 6 characters.'); return; }
+    // Company access key check with rate limiting
+    var keyLock = _rlCheck('regkey');
+    if (keyLock) { showErr('err-reg', keyLock); return; }
+    if (accessKey !== 'formingthefuture') {
+      _rlFail('regkey');
+      var kLeft = _rlAttemptsLeft('regkey');
+      var kMsg = 'Invalid company access key.';
+      if (kLeft > 0 && kLeft <= 3) kMsg += ' ' + kLeft + ' attempt' + (kLeft !== 1 ? 's' : '') + ' remaining before lockout.';
+      showErr('err-reg', kMsg); return;
+    }
     var hashed = await sha256(password);
     var token  = uuid();
     var r = await tryApi('/api/register', { username: username, hashedPassword: hashed, deviceToken: token });
@@ -3369,6 +3404,64 @@ async function _pullProfileFromSb(username) {
 }
 
 // Auth helpers — sync user records to Supabase so any device can log in
+// ── Rate-limit helpers ────────────────────────────────────────────────────
+// Each "key" tracks { attempts, lockedUntil, nextLockMins } in localStorage.
+// 10 consecutive failures → locked for nextLockMins (10→20→40→80…).
+// Successful action resets attempts and nextLockMins back to 10.
+function _rlGet(key) {
+  try { return JSON.parse(localStorage.getItem('rl_' + key) || '{}'); } catch(e) { return {}; }
+}
+function _rlSet(key, d) { localStorage.setItem('rl_' + key, JSON.stringify(d)); }
+function _rlCheck(key) {
+  var d = _rlGet(key);
+  if (d.lockedUntil && Date.now() < d.lockedUntil) {
+    var sec = Math.ceil((d.lockedUntil - Date.now()) / 1000);
+    return 'Too many attempts. Try again in ' + (sec < 60 ? sec + ' second' + (sec !== 1 ? 's' : '') : Math.ceil(sec / 60) + ' minute' + (Math.ceil(sec / 60) !== 1 ? 's' : '')) + '.';
+  }
+  return null;
+}
+function _rlFail(key) {
+  var d = _rlGet(key);
+  if (d.lockedUntil && Date.now() < d.lockedUntil) return;
+  d.attempts = (d.attempts || 0) + 1;
+  if (d.attempts >= 10) {
+    d.nextLockMins = d.nextLockMins || 10;
+    d.lockedUntil  = Date.now() + d.nextLockMins * 60000;
+    d.nextLockMins = d.nextLockMins * 2;
+    d.attempts     = 0;
+  }
+  _rlSet(key, d);
+}
+function _rlSuccess(key) {
+  var d = _rlGet(key);
+  d.attempts     = 0;
+  d.nextLockMins = 10;
+  delete d.lockedUntil;
+  _rlSet(key, d);
+}
+function _rlAttemptsLeft(key) {
+  var d = _rlGet(key);
+  return Math.max(0, 10 - (d.attempts || 0));
+}
+
+// ── Pull ALL auth users from Supabase and merge into localStorage.users ───
+async function _syncAllUsersFromSb() {
+  if (!window._sb) return;
+  try {
+    var result = await window._sb.from('auth_users').select('*');
+    if (!result.data || !result.data.length) return;
+    var local = JSON.parse(localStorage.getItem('users') || '[]');
+    result.data.forEach(function(row) {
+      var un = (row.username || '').toLowerCase();
+      var idx = local.findIndex(function(u) { return (u.username || '').toLowerCase() === un; });
+      var entry = { username: un, hashedPassword: row.hashed_password || '', isAdmin: !!row.is_admin, deactivated: !!row.deactivated };
+      if (idx >= 0) local[idx] = Object.assign({}, local[idx], entry);
+      else local.push(entry);
+    });
+    localStorage.setItem('users', JSON.stringify(local));
+  } catch(e) { console.warn('_syncAllUsersFromSb failed:', e); }
+}
+
 async function _pushAuthUserToSb(username, hashedPassword, isAdmin, deactivated) {
   if (!window._sb) return;
   try {
@@ -7181,6 +7274,10 @@ window.updateMgmtButton=function(){
 // ── NAV ───────────────────────────────────────────────────────────────────
 window.mgmtNav=function(sec){
   S.sec=sec;_updNav();_render();
+  if(sec==='user-mgmt'){
+    // Pull all registered users from Supabase so every device's signups appear
+    _syncAllUsersFromSb().then(function(){ if(S.sec==='user-mgmt') _render(); });
+  }
   if(sec==='contacts'){
     var hl=localStorage.getItem('highlight_contact');
     if(hl){
