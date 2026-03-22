@@ -2564,8 +2564,40 @@
 
   // ── Contacts sync ─────────────────────────────────────────────────────────
   function syncProfileToContacts(username, profile) {
+    var un = username.toLowerCase();
+
+    // 1. Push into shared state.contacts (synced to Supabase via save())
+    //    Field names must match what renderContacts() expects: name/dept not fullName/department
+    var sharedEntry = {
+      id:            'user_' + un,
+      username:      un,
+      name:          profile.fullName   || username,
+      email:         profile.email      || '',
+      phone:         profile.phone      || '',
+      dept:          profile.department || '',
+      role:          profile.role       || '',
+      supervisor:    profile.supervisorName || '',
+      photo:         profile.photo      || null,
+      isUserProfile: true
+    };
+    if (typeof state !== 'undefined' && Array.isArray(state.contacts)) {
+      var sidx = -1;
+      for (var j = 0; j < state.contacts.length; j++) {
+        var cu = (state.contacts[j].username || '').toLowerCase();
+        if (cu === un || state.contacts[j].id === sharedEntry.id) { sidx = j; break; }
+      }
+      if (sidx >= 0) state.contacts[sidx] = sharedEntry;
+      else state.contacts.push(sharedEntry);
+      if (typeof save === 'function') save(); // syncs to Supabase
+    }
+
+    // 2. Also store full profile in Supabase profiles table (already done by caller via _pushProfileToSb)
+    //    And cache the full profile object locally under profile_[username] for management console enrichment
+    localStorage.setItem('profile_' + un, JSON.stringify(profile));
+
+    // 3. Keep legacy localStorage.contacts key for any code that still reads it
     var contacts = JSON.parse(localStorage.getItem('contacts') || '[]');
-    var entry = {
+    var legacyEntry = {
       username:   username,
       fullName:   profile.fullName   || '',
       email:      profile.email      || '',
@@ -2577,12 +2609,47 @@
     };
     var idx = -1;
     for (var i = 0; i < contacts.length; i++) {
-      if (contacts[i].username === username) { idx = i; break; }
+      if ((contacts[i].username || '').toLowerCase() === un) { idx = i; break; }
     }
-    if (idx >= 0) contacts[idx] = entry;
-    else contacts.push(entry);
+    if (idx >= 0) contacts[idx] = legacyEntry;
+    else contacts.push(legacyEntry);
     localStorage.setItem('contacts', JSON.stringify(contacts));
   }
+
+  // ── Pull all profiles from Supabase into localStorage ─────────────────────
+  // Called when management opens so admin can see every user's full name/dept/role
+  window._syncAllProfilesFromSb = async function() {
+    if (!window._sb) return;
+    try {
+      var result = await window._sb.from('profiles').select('username, data');
+      if (!result.data) return;
+      result.data.forEach(function(row) {
+        if (!row.username || !row.data) return;
+        var key = 'profile_' + row.username.toLowerCase();
+        // Always overwrite — Supabase is source of truth for remote profiles
+        localStorage.setItem(key, JSON.stringify(row.data));
+        // Also sync into state.contacts so the contacts page stays current
+        if (typeof state !== 'undefined' && Array.isArray(state.contacts)) {
+          var un = row.username.toLowerCase();
+          var p  = row.data;
+          var entry = {
+            id: 'user_' + un, username: un,
+            name: p.fullName || un, email: p.email || '', phone: p.phone || '',
+            dept: p.department || '', role: p.role || '',
+            supervisor: p.supervisorName || '', photo: p.photo || null,
+            isUserProfile: true
+          };
+          var found = false;
+          for (var i = 0; i < state.contacts.length; i++) {
+            if ((state.contacts[i].username || '').toLowerCase() === un) {
+              state.contacts[i] = entry; found = true; break;
+            }
+          }
+          if (!found) state.contacts.push(entry);
+        }
+      });
+    } catch(e) { console.warn('_syncAllProfilesFromSb failed:', e); }
+  };
 
   // ── Global helpers ────────────────────────────────────────────────────────
   window.getProfile = function () {
@@ -2700,6 +2767,7 @@
 <div class="breadcrumb-nav" id="breadcrumbNav">
   <button class="breadcrumb-home active" id="btnHome" onclick="navHome()">🏠 Home</button>
   <button class="breadcrumb-home" id="btnMyTasks" onclick="navMyTasks()">📋 My Tasks</button>
+  <button class="breadcrumb-home" id="btnSalesBacklog" onclick="navSalesBacklog()">📦 Sales Backlog</button>
   <span class="breadcrumb-sep" id="breadcrumbSep" style="display:none">›</span>
   <span class="breadcrumb-dept-label" id="breadcrumbDeptLabel" style="cursor:pointer" onclick="if(currentDept)switchDeptTab('overview',document.querySelector('[data-tab=overview]'))"></span>
   <div class="dept-tab-bar" id="deptTabBar" style="display:none">
@@ -2732,6 +2800,11 @@
   <!-- ═══ MY TASKS VIEW ═══ -->
   <div id="view-my-tasks" class="view">
     <div id="myTasksContent"></div>
+  </div>
+
+  <!-- ═══ SALES BACKLOG VIEW ═══ -->
+  <div id="view-sales-backlog" class="view" data-bltab="upload">
+    <div id="blViewRoot"></div>
   </div>
 
 </div>
@@ -3483,6 +3556,12 @@ function load() {
     }
     // Start listening for real-time updates from other users
     _startRealtime();
+    // Pull all user profiles from Supabase so contacts/team pages show everyone
+    if (typeof window._syncAllProfilesFromSb === 'function') {
+      window._syncAllProfilesFromSb().then(function() {
+        if (typeof renderHome === 'function') renderHome();
+      });
+    }
   });
 }
 
@@ -3758,6 +3837,7 @@ function navHome() {
   document.getElementById('deptTabBar').style.display        = 'none';
   document.getElementById('btnHome').classList.add('active');
   var bmt = document.getElementById('btnMyTasks'); if (bmt) bmt.classList.remove('active');
+  var bsb = document.getElementById('btnSalesBacklog'); if (bsb) bsb.classList.remove('active');
   renderHome();
 }
 
@@ -3771,7 +3851,22 @@ function navMyTasks() {
   document.getElementById('deptTabBar').style.display        = 'none';
   document.getElementById('btnHome').classList.remove('active');
   var bmt = document.getElementById('btnMyTasks'); if (bmt) bmt.classList.add('active');
+  var bsb = document.getElementById('btnSalesBacklog'); if (bsb) bsb.classList.remove('active');
   renderMyTasks();
+}
+
+function navSalesBacklog() {
+  if (autoRouteTimer) { clearTimeout(autoRouteTimer); autoRouteTimer = null; }
+  currentDept = null;
+  document.querySelectorAll('.view').forEach(function(v){ v.classList.remove('active'); });
+  document.getElementById('view-sales-backlog').classList.add('active');
+  document.getElementById('breadcrumbSep').style.display     = 'none';
+  document.getElementById('breadcrumbDeptLabel').textContent = '';
+  document.getElementById('deptTabBar').style.display        = 'none';
+  document.getElementById('btnHome').classList.remove('active');
+  var bmt = document.getElementById('btnMyTasks');     if (bmt) bmt.classList.remove('active');
+  var bsb = document.getElementById('btnSalesBacklog'); if (bsb) bsb.classList.add('active');
+  blInit();
 }
 
 function navDept(dept) {
@@ -3790,6 +3885,7 @@ function navDept(dept) {
   document.getElementById('deptTabBar').style.display        = 'flex';
   document.getElementById('btnHome').classList.remove('active');
   var bmt = document.getElementById('btnMyTasks'); if (bmt) bmt.classList.remove('active');
+  var bsb = document.getElementById('btnSalesBacklog'); if (bsb) bsb.classList.remove('active');
   var ordersTab = document.getElementById('ordersTab');
   if (ordersTab) ordersTab.style.display = (dept === 'Sales') ? '' : 'none';
   document.querySelectorAll('.dept-tab').forEach(function(t){
@@ -6731,6 +6827,71 @@ function renderPersonalDashboard() {
     .ms-lbl{display:none;}
     .mh-title,.mh-sub{display:none;}
   }
+
+  /* ═══ SALES BACKLOG MODULE ═══ */
+  .bl-apibanner{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:#fcd34d;padding:10px 16px;border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;font-size:14px}
+  .bl-subnav{background:var(--bg-secondary);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:2px;margin:-24px -24px 24px -24px}
+  .bl-tab{padding:12px 18px;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:14px;font-weight:500;border-bottom:2px solid transparent;transition:.2s;white-space:nowrap}
+  .bl-tab:hover{color:var(--text-primary)}.bl-tab.active{color:var(--accent-orange);border-bottom-color:var(--accent-orange)}
+  .bl-panel{display:none}.bl-panel.active{display:block}
+  .bl-section-title{font-size:20px;font-weight:700;margin-bottom:4px;color:var(--text-primary)}
+  .bl-section-sub{color:var(--text-secondary);font-size:14px;margin-bottom:20px}
+  .bl-upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+  @media(max-width:760px){.bl-upload-grid{grid-template-columns:1fr}}
+  .bl-dropzone{border:2px dashed var(--border);border-radius:12px;padding:56px 32px;text-align:center;cursor:pointer;transition:.2s;background:var(--bg-secondary);min-height:240px;display:flex;align-items:center;justify-content:center}
+  .bl-dropzone:hover,.bl-dropzone.bl-drag{border-color:var(--accent-orange);background:rgba(249,115,22,.08)}
+  .bl-upload-title{font-size:18px;font-weight:600;margin-bottom:6px;color:var(--text-primary)}
+  .bl-upload-sub{color:var(--text-secondary);font-size:14px}
+  .bl-spinner{width:44px;height:44px;border:3px solid var(--border);border-top-color:var(--accent-orange);border-radius:50%;animation:blspin .8s linear infinite;margin:0 auto 16px}
+  @keyframes blspin{to{transform:rotate(360deg)}}
+  .bl-alert{padding:12px 16px;border-radius:8px;font-size:14px;margin-top:12px}
+  .bl-alert-err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#fca5a5}
+  .bl-alert-ok{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#86efac}
+  .bl-snap-card{background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:18px}
+  .bl-snap-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+  .bl-snap-cur{color:var(--accent-orange)}.bl-snap-prev{color:var(--accent-blue)}
+  .bl-snap-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px}
+  .bl-snap-row:last-child{border-bottom:none}
+  .bl-snap-key{color:var(--text-secondary)}.bl-snap-val{font-weight:600;text-align:right;max-width:58%;word-break:break-all}
+  .bl-no-snap{color:var(--text-secondary);font-size:13px;font-style:italic;margin:0}
+  .bl-orange{color:var(--accent-orange)}.bl-green{color:var(--accent-green)}.bl-red{color:var(--accent-red)}.bl-blue{color:var(--accent-blue)}
+  .bl-stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+  .bl-stat{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+  .bl-stat-label{font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+  .bl-stat-val{font-size:17px;font-weight:700;color:var(--text-primary)}
+  .bl-card{background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:20px}
+  .bl-tbl-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .bl-table{width:100%;border-collapse:collapse;font-size:13px}
+  .bl-table th{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);color:var(--text-secondary);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;cursor:pointer;user-select:none;white-space:nowrap}
+  .bl-table th:hover{color:var(--text-primary)}.bl-table th.bl-sorted{color:var(--accent-orange)}
+  .bl-table td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--text-primary)}
+  .bl-table tr:last-child td{border-bottom:none}.bl-table tr:hover td{background:var(--bg-hover)}
+  .bl-due-over{color:var(--accent-red)!important;font-weight:600}.bl-due-soon{color:var(--accent-yellow)!important;font-weight:600}.bl-due-ok{color:var(--accent-green)!important}
+  .bl-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;text-transform:capitalize}
+  .bl-b-open{background:rgba(59,130,246,.12);color:#93c5fd;border:1px solid rgba(59,130,246,.3)}
+  .bl-b-pending{background:rgba(245,158,11,.12);color:#fcd34d;border:1px solid rgba(245,158,11,.3)}
+  .bl-b-overdue{background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
+  .bl-b-done{background:rgba(34,197,94,.12);color:#86efac;border:1px solid rgba(34,197,94,.3)}
+  .bl-b-default{background:rgba(139,148,158,.12);color:var(--text-secondary);border:1px solid rgba(139,148,158,.2)}
+  .bl-empty{text-align:center;padding:56px 20px;color:var(--text-secondary)}
+  .bl-empty-title{font-size:16px;font-weight:600;margin-bottom:6px;color:var(--text-primary)}
+  .bl-ctabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:18px}
+  .bl-ctab{padding:10px 16px;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:14px;font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.2s;display:flex;align-items:center;gap:7px}
+  .bl-ctab:hover{color:var(--text-primary)}.bl-ctab.active{color:var(--accent-orange);border-bottom-color:var(--accent-orange)}
+  .bl-cpanel{display:none}.bl-cpanel.active{display:block}
+  .bl-cbadge{border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700}
+  .bl-cbadge-g{background:rgba(34,197,94,.12);color:#86efac}.bl-cbadge-r{background:rgba(239,68,68,.12);color:#fca5a5}.bl-cbadge-b{background:rgba(59,130,246,.12);color:#93c5fd}
+  .bl-btn{padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:.2s;display:inline-flex;align-items:center;gap:6px}
+  .bl-btn-sm{padding:5px 12px;font-size:12px}
+  .bl-btn-primary{background:var(--accent-orange);color:#fff}.bl-btn-primary:hover{opacity:.85}
+  .bl-btn-ghost{background:none;border:1px solid var(--border);color:var(--text-secondary)}.bl-btn-ghost:hover{border-color:var(--text-secondary);color:var(--text-primary)}
+  .bl-btn-green{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#86efac}.bl-btn-green:hover{background:rgba(34,197,94,.2)}
+  .bl-keyoverlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;display:none;align-items:center;justify-content:center}
+  .bl-keymodal{background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:28px;width:100%;max-width:420px}
+  .bl-modal-title{font-size:18px;font-weight:700;margin-bottom:4px;color:var(--text-primary)}
+  .bl-modal-sub{color:var(--text-secondary);font-size:14px;margin-bottom:18px}
+  .bl-input{width:100%;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text-primary);font-size:14px;outline:none;transition:.2s}
+  .bl-input:focus{border-color:var(--accent-orange)}
 </style>
 
 <!-- ── MGMT HEADER ── -->
@@ -6817,6 +6978,13 @@ window.openMgmt=function(){
   var ph=document.getElementById('profile-header');if(ph)ph.style.display='none';
   var app=document.getElementById('mgmt-app');app.style.display='flex';app.style.flexDirection='column';
   S.sec='overview';_updNav();_render();
+  // Pull all user profiles from Supabase so admin sees everyone's full name/dept/role
+  // even if those users have never logged in on this device
+  if(typeof window._syncAllProfilesFromSb==='function'){
+    window._syncAllProfilesFromSb().then(function(){
+      if(S.sec==='users') _render(); // refresh user list if currently on that tab
+    });
+  }
 };
 window.closeMgmt=function(){
   document.getElementById('mgmt-app').style.display='none';
@@ -7349,6 +7517,481 @@ window.mDrillDept=function(dept){closeMgmt();if(typeof navDept==='function')navD
 })();
 </script>
 </div><!-- /#mgmt-app -->
+
+<!-- ═══ SALES BACKLOG MODULE ═══ -->
+<script>
+// ─────────────────────────────────────────────────────────
+// SALES BACKLOG — bl_ namespace to avoid conflicts
+// ─────────────────────────────────────────────────────────
+var blSnapCur = null, blSnapPrev = null, blSorts = {}, blCmpTab = 'new';
+
+function blLoadSnaps() {
+  try { blSnapCur  = JSON.parse(localStorage.getItem('sales_backlog_current'))  || null; } catch(e) { blSnapCur  = null; }
+  try { blSnapPrev = JSON.parse(localStorage.getItem('sales_backlog_previous')) || null; } catch(e) { blSnapPrev = null; }
+}
+
+function blInit() {
+  blLoadSnaps();
+  var el = document.getElementById('view-sales-backlog');
+  var activeTab = el.dataset.bltab || 'upload';
+  var apiKey = localStorage.getItem('bl_apikey') || '';
+  document.getElementById('blViewRoot').innerHTML = blBuildUI(activeTab, apiKey);
+  blRenderActiveTab(activeTab);
+}
+
+function blBuildUI(activeTab, apiKey) {
+  var banner = apiKey ? '' :
+    '<div class="bl-apibanner"><span>⚠ Anthropic API key not set — PDF extraction won\'t work.</span>' +
+    '<button class="bl-btn bl-btn-sm bl-btn-primary" onclick="blOpenKeyModal()">Set API Key</button></div>';
+
+  var tabs = [
+    {id:'upload',   icon:'📤', label:'Upload'},
+    {id:'current',  icon:'📋', label:'Current Backlog'},
+    {id:'previous', icon:'📂', label:'Previous Backlog'},
+    {id:'compare',  icon:'🔍', label:'Comparison'}
+  ];
+  var tabHtml = tabs.map(function(t) {
+    return '<button class="bl-tab ' + (t.id === activeTab ? 'active' : '') + '" data-bltab="' + t.id + '" onclick="blGoTo(\'' + t.id + '\')">' + t.icon + ' ' + t.label + '</button>';
+  }).join('');
+
+  return banner +
+    '<!-- API Key Modal -->' +
+    '<div class="bl-keyoverlay" id="blKeyOverlay" onclick="if(event.target===this)blCloseKeyModal()">' +
+      '<div class="bl-keymodal">' +
+        '<div class="bl-modal-title">🔑 Anthropic API Key</div>' +
+        '<div class="bl-modal-sub">Stored only in your browser. Used to read PDF files with AI.</div>' +
+        '<input class="bl-input" id="blApiKeyInput" type="password" placeholder="sk-ant-api03-...">' +
+        '<div style="font-size:12px;color:var(--text-secondary);margin-top:6px">Get yours at <a href="https://console.anthropic.com" target="_blank" style="color:var(--accent-orange)">console.anthropic.com</a> → API Keys</div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">' +
+          '<button class="bl-btn bl-btn-ghost" onclick="blCloseKeyModal()">Cancel</button>' +
+          '<button class="bl-btn bl-btn-primary" onclick="blSaveApiKey()">Save</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="bl-subnav">' + tabHtml +
+      '<div style="flex:1"></div>' +
+      '<button class="bl-btn bl-btn-ghost bl-btn-sm" style="margin:8px 0" onclick="blOpenKeyModal()">⚙ API Key</button>' +
+    '</div>' +
+    '<div class="bl-panel ' + (activeTab === 'upload'   ? 'active' : '') + '" id="blpanel-upload">'   + blUploadHtml() + '</div>' +
+    '<div class="bl-panel ' + (activeTab === 'current'  ? 'active' : '') + '" id="blpanel-current"><div id="blCurContent"></div></div>' +
+    '<div class="bl-panel ' + (activeTab === 'previous' ? 'active' : '') + '" id="blpanel-previous"><div id="blPrevContent"></div></div>' +
+    '<div class="bl-panel ' + (activeTab === 'compare'  ? 'active' : '') + '" id="blpanel-compare"><div id="blCmpContent"></div></div>';
+}
+
+function blUploadHtml() {
+  return '<div class="bl-section-title">Upload Backlog PDF</div>' +
+    '<div class="bl-section-sub">AI reads your PDF and extracts all order data automatically. Current snapshot shifts to Previous on each new upload.</div>' +
+    '<div class="bl-upload-grid">' +
+      '<div>' +
+        '<div class="bl-dropzone" id="blDropzone" onclick="document.getElementById(\'blFileInput\').click()" ondrop="blOnDrop(event)" ondragover="blOnDragOver(event)" ondragleave="blOnDragLeave(event)">' +
+          '<div id="blUploadDefault">' +
+            '<div style="font-size:48px;margin-bottom:14px">📄</div>' +
+            '<div class="bl-upload-title">Drop your PDF here</div>' +
+            '<div class="bl-upload-sub">or click to browse · .pdf files only</div>' +
+            '<button class="bl-btn bl-btn-primary" style="margin-top:16px" onclick="event.stopPropagation();document.getElementById(\'blFileInput\').click()">Choose PDF</button>' +
+          '</div>' +
+          '<div id="blLoadingState" style="display:none;text-align:center">' +
+            '<div class="bl-spinner"></div>' +
+            '<div style="font-size:15px;color:var(--text-secondary);font-weight:500">Reading your backlog PDF...</div>' +
+          '</div>' +
+        '</div>' +
+        '<input type="file" id="blFileInput" accept=".pdf" style="display:none" onchange="blOnFileSelect(event)">' +
+        '<div class="bl-alert bl-alert-err" id="blErrAlert" style="display:none"></div>' +
+        '<div class="bl-alert bl-alert-ok"  id="blOkAlert"  style="display:none"></div>' +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:12px">' +
+        blSnapInfoCard('cur',  blSnapCur) +
+        blSnapInfoCard('prev', blSnapPrev) +
+      '</div>' +
+    '</div>';
+}
+
+function blSnapInfoCard(which, snap) {
+  var label = which === 'cur' ? '● Current Snapshot' : '● Previous Snapshot';
+  var cls   = which === 'cur' ? 'bl-snap-cur' : 'bl-snap-prev';
+  var inner = snap ?
+    '<div class="bl-snap-row"><span class="bl-snap-key">Date</span><span class="bl-snap-val">' + blFmtDate(new Date(snap.uploadedAt)) + '</span></div>' +
+    '<div class="bl-snap-row"><span class="bl-snap-key">Time</span><span class="bl-snap-val">' + blFmtTime(new Date(snap.uploadedAt)) + '</span></div>' +
+    '<div class="bl-snap-row"><span class="bl-snap-key">Uploaded by</span><span class="bl-snap-val">' + blEsc(snap.uploadedBy || '—') + '</span></div>' +
+    '<div class="bl-snap-row"><span class="bl-snap-key">File</span><span class="bl-snap-val" title="' + blEsc(snap.filename) + '">' + blEsc(blTrunc(snap.filename, 26)) + '</span></div>' +
+    '<div class="bl-snap-row"><span class="bl-snap-key">Total orders</span><span class="bl-snap-val">' + snap.totalOrders + '</span></div>' +
+    '<div class="bl-snap-row"><span class="bl-snap-key">Total value</span><span class="bl-snap-val bl-orange">' + blFmtCur(snap.totalValue) + '</span></div>'
+    : '<p class="bl-no-snap">No snapshot loaded yet.</p>';
+  return '<div class="bl-snap-card"><div class="bl-snap-label ' + cls + '">' + label + '</div>' + inner + '</div>';
+}
+
+// ─── NAV WITHIN BACKLOG ───────────────────────────────────
+function blGoTo(tab) {
+  var el = document.getElementById('view-sales-backlog');
+  if (el) el.dataset.bltab = tab;
+  document.querySelectorAll('[data-bltab]').forEach(function(t) {
+    if (t.tagName === 'BUTTON') t.classList.toggle('active', t.dataset.bltab === tab);
+  });
+  document.querySelectorAll('.bl-panel').forEach(function(p) { p.classList.remove('active'); });
+  var panel = document.getElementById('blpanel-' + tab);
+  if (panel) panel.classList.add('active');
+  blRenderActiveTab(tab);
+}
+
+function blRenderActiveTab(tab) {
+  if (tab === 'current')  blRenderBacklog('cur');
+  if (tab === 'previous') blRenderBacklog('prev');
+  if (tab === 'compare')  blRenderCompare();
+}
+
+// ─── API KEY MODAL ────────────────────────────────────────
+function blOpenKeyModal() {
+  var ov = document.getElementById('blKeyOverlay');
+  if (!ov) return;
+  var inp = document.getElementById('blApiKeyInput');
+  if (inp) inp.value = localStorage.getItem('bl_apikey') || '';
+  ov.style.display = 'flex';
+}
+function blCloseKeyModal() {
+  var ov = document.getElementById('blKeyOverlay');
+  if (ov) ov.style.display = 'none';
+}
+function blSaveApiKey() {
+  var val = (document.getElementById('blApiKeyInput').value || '').trim();
+  if (!val) { alert('Please enter your API key.'); return; }
+  localStorage.setItem('bl_apikey', val);
+  blCloseKeyModal();
+  var banner = document.querySelector('.bl-apibanner');
+  if (banner) banner.style.display = 'none';
+}
+
+// ─── FILE UPLOAD ──────────────────────────────────────────
+function blOnDragOver(e) { e.preventDefault(); var dz = document.getElementById('blDropzone'); if (dz) dz.classList.add('bl-drag'); }
+function blOnDragLeave()  { var dz = document.getElementById('blDropzone'); if (dz) dz.classList.remove('bl-drag'); }
+function blOnDrop(e) {
+  e.preventDefault();
+  var dz = document.getElementById('blDropzone'); if (dz) dz.classList.remove('bl-drag');
+  if (e.dataTransfer.files.length) blProcessFile(e.dataTransfer.files[0]);
+}
+function blOnFileSelect(e) {
+  if (e.target.files.length) blProcessFile(e.target.files[0]);
+  e.target.value = '';
+}
+
+async function blProcessFile(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) { blShowAlert('err', 'Please upload a PDF file (.pdf only).'); return; }
+  var apiKey = localStorage.getItem('bl_apikey') || '';
+  if (!apiKey) { blShowAlert('err', 'No API key set. Click ⚙ API Key button to add it.'); return; }
+  blClearAlerts();
+  blSetLoading(true);
+  try {
+    var b64    = await blToBase64(file);
+    var orders = await blExtractOrders(b64, apiKey);
+
+    // Rotate snapshots — previous gets replaced, current becomes previous
+    blSnapPrev = blSnapCur;
+    if (blSnapPrev) localStorage.setItem('sales_backlog_previous', JSON.stringify(blSnapPrev));
+    else            localStorage.removeItem('sales_backlog_previous');
+
+    var totalValue = orders.reduce(function(s, o) { return s + (parseFloat(o.orderValue) || 0); }, 0);
+    blSnapCur = {
+      uploadedAt:  new Date().toISOString(),
+      uploadedBy:  localStorage.getItem('current_user') || 'Unknown',
+      filename:    file.name,
+      totalOrders: orders.length,
+      totalValue:  totalValue,
+      orders:      orders
+    };
+    localStorage.setItem('sales_backlog_current', JSON.stringify(blSnapCur));
+    blSetLoading(false);
+    blShowAlert('ok', '✓ Extracted ' + orders.length + ' orders from "' + file.name + '" · Total: ' + blFmtCur(totalValue));
+    // Refresh the snapshot info cards in place
+    var cards = document.querySelectorAll('.bl-snap-card');
+    if (cards[0]) cards[0].outerHTML = blSnapInfoCard('cur',  blSnapCur);
+    cards = document.querySelectorAll('.bl-snap-card');
+    if (cards[1]) cards[1].outerHTML = blSnapInfoCard('prev', blSnapPrev);
+  } catch(err) {
+    blSetLoading(false);
+    blShowAlert('err', 'Could not read PDF. Please check the file and try again.');
+    console.error(err);
+  }
+}
+
+function blToBase64(file) {
+  return new Promise(function(res, rej) {
+    var r = new FileReader();
+    r.onload = function(e) { res(e.target.result.split(',')[1]); };
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+async function blExtractOrders(b64, apiKey) {
+  var resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4096,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } },
+          { type: 'text', text: 'Extract all open orders from this PDF into a JSON array. Each order should have these fields: orderNumber, customerName, orderValue, orderDate, dueDate, status, product, quantity, notes. Return ONLY a valid JSON array, no other text or markdown.' }
+        ]
+      }]
+    })
+  });
+  if (!resp.ok) throw new Error('API ' + resp.status + ': ' + (await resp.text()));
+  var data = await resp.json();
+  var txt = (data.content[0].text || '').trim();
+  var m = txt.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (m) txt = m[1].trim();
+  var arr = JSON.parse(txt);
+  if (!Array.isArray(arr)) throw new Error('Response was not an array');
+  return arr;
+}
+
+// ─── LOADING / ALERTS ─────────────────────────────────────
+function blSetLoading(on) {
+  var ls = document.getElementById('blLoadingState');
+  var ud = document.getElementById('blUploadDefault');
+  var dz = document.getElementById('blDropzone');
+  if (ls) ls.style.display = on ? 'block'   : 'none';
+  if (ud) ud.style.display = on ? 'none'    : '';
+  if (dz) dz.style.cursor  = on ? 'default' : 'pointer';
+}
+function blShowAlert(type, msg) {
+  blClearAlerts();
+  var el = document.getElementById(type === 'err' ? 'blErrAlert' : 'blOkAlert');
+  if (el) { el.textContent = msg; el.style.display = 'block'; }
+}
+function blClearAlerts() {
+  var e = document.getElementById('blErrAlert'); if (e) e.style.display = 'none';
+  var o = document.getElementById('blOkAlert');  if (o) o.style.display = 'none';
+}
+
+// ─── BACKLOG TABLE ────────────────────────────────────────
+function blRenderBacklog(which) {
+  var snap  = which === 'cur' ? blSnapCur : blSnapPrev;
+  var cid   = which === 'cur' ? 'blCurContent' : 'blPrevContent';
+  var el    = document.getElementById(cid);
+  if (!el) return;
+  var label = which === 'cur' ? 'Current' : 'Previous';
+  var icon  = which === 'cur' ? '📋' : '📂';
+
+  if (!snap) {
+    el.innerHTML = '<div class="bl-empty"><div style="font-size:40px;margin-bottom:12px">' + icon + '</div>' +
+      '<div class="bl-empty-title">No ' + label.toLowerCase() + ' snapshot</div>' +
+      '<div>Upload a PDF on the Upload tab to load data.</div></div>';
+    return;
+  }
+
+  var sk = blSorts[which] || {};
+  var orders = snap.orders.slice();
+  if (sk.col) {
+    orders.sort(function(a, b) {
+      var va = a[sk.col] != null ? a[sk.col] : '', vb = b[sk.col] != null ? b[sk.col] : '';
+      if (sk.col === 'orderValue' || sk.col === 'quantity') { va = parseFloat(va) || 0; vb = parseFloat(vb) || 0; }
+      else { va = String(va).toLowerCase(); vb = String(vb).toLowerCase(); }
+      return (va < vb ? -1 : va > vb ? 1 : 0) * (sk.dir === 'asc' ? 1 : -1);
+    });
+  }
+
+  var cols = [
+    {k:'orderNumber',l:'Order #'},{k:'customerName',l:'Customer'},{k:'product',l:'Product'},
+    {k:'quantity',l:'Qty'},{k:'orderValue',l:'Value'},{k:'orderDate',l:'Order Date'},
+    {k:'dueDate',l:'Due Date'},{k:'status',l:'Status'},{k:'notes',l:'Notes'}
+  ];
+  var ths = cols.map(function(c) {
+    var sorted = sk.col === c.k;
+    var ico = sorted ? (sk.dir === 'asc' ? ' ▲' : ' ▼') : ' ⇅';
+    return '<th class="' + (sorted ? 'bl-sorted' : '') + '" onclick="blSortTable(\'' + which + '\',\'' + c.k + '\')">' + c.l + '<span style="opacity:.5">' + ico + '</span></th>';
+  }).join('');
+  var trs = orders.map(function(o) {
+    return '<tr>' +
+      '<td><strong>' + blEsc(o.orderNumber || '—') + '</strong></td>' +
+      '<td>' + blEsc(o.customerName || '—') + '</td>' +
+      '<td>' + blEsc(o.product || '—') + '</td>' +
+      '<td>' + blEsc(String(o.quantity != null ? o.quantity : '—')) + '</td>' +
+      '<td style="font-variant-numeric:tabular-nums">' + (o.orderValue != null ? blFmtCur(o.orderValue) : '—') + '</td>' +
+      '<td>' + blFmtDateStr(o.orderDate) + '</td>' +
+      '<td class="' + blDueCls(o.dueDate) + '">' + blFmtDateStr(o.dueDate) + '</td>' +
+      '<td>' + blStatusBadge(o.status) + '</td>' +
+      '<td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + blEsc(o.notes || '') + '">' + blEsc(o.notes || '—') + '</td>' +
+    '</tr>';
+  }).join('');
+
+  el.innerHTML =
+    '<div class="bl-section-title">' + icon + ' ' + label + ' Backlog</div>' +
+    '<div class="bl-stats-grid">' +
+      '<div class="bl-stat"><div class="bl-stat-label">Date</div><div class="bl-stat-val">' + blFmtDate(new Date(snap.uploadedAt)) + '</div></div>' +
+      '<div class="bl-stat"><div class="bl-stat-label">Time</div><div class="bl-stat-val">' + blFmtTime(new Date(snap.uploadedAt)) + '</div></div>' +
+      '<div class="bl-stat"><div class="bl-stat-label">Uploaded By</div><div class="bl-stat-val">' + blEsc(snap.uploadedBy || '—') + '</div></div>' +
+      '<div class="bl-stat"><div class="bl-stat-label">File</div><div class="bl-stat-val" title="' + blEsc(snap.filename) + '" style="font-size:13px">' + blEsc(blTrunc(snap.filename, 22)) + '</div></div>' +
+      '<div class="bl-stat"><div class="bl-stat-label">Total Orders</div><div class="bl-stat-val bl-orange">' + snap.totalOrders + '</div></div>' +
+      '<div class="bl-stat"><div class="bl-stat-label">Total Value</div><div class="bl-stat-val bl-orange">' + blFmtCur(snap.totalValue) + '</div></div>' +
+    '</div>' +
+    '<div class="bl-card">' +
+      '<div class="bl-tbl-top">' +
+        '<span style="font-size:15px;font-weight:600;color:var(--text-primary)">Order Details</span>' +
+        '<button class="bl-btn bl-btn-green" onclick="blExportCSV(\'' + which + '\')">⬇ Export CSV</button>' +
+      '</div>' +
+      '<div style="overflow-x:auto"><table class="bl-table">' +
+        '<thead><tr>' + ths + '</tr></thead>' +
+        '<tbody>' + (trs || '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-secondary)">No orders found</td></tr>') + '</tbody>' +
+      '</table></div>' +
+    '</div>';
+}
+
+function blSortTable(which, col) {
+  var s = blSorts[which] || {};
+  blSorts[which] = { col: col, dir: s.col === col && s.dir === 'asc' ? 'desc' : 'asc' };
+  blRenderBacklog(which);
+}
+
+// ─── COMPARISON ───────────────────────────────────────────
+function blRenderCompare() {
+  var el = document.getElementById('blCmpContent');
+  if (!el) return;
+
+  if (!blSnapCur && !blSnapPrev) {
+    el.innerHTML = '<div class="bl-empty"><div style="font-size:40px;margin-bottom:12px">🔍</div><div class="bl-empty-title">No snapshots to compare</div><div>Upload at least two PDFs to enable comparison.</div></div>';
+    return;
+  }
+  if (!blSnapPrev) {
+    el.innerHTML = '<div class="bl-empty"><div style="font-size:40px;margin-bottom:12px">🔍</div><div class="bl-empty-title">Only one snapshot loaded</div><div>Upload a second PDF to compare with the current snapshot.</div></div>';
+    return;
+  }
+
+  var cur = blSnapCur.orders || [], prev = blSnapPrev.orders || [];
+  var curNums = {}, prevNums = {};
+  cur.forEach(function(o)  { curNums[blNorm(o.orderNumber)]  = true; });
+  prev.forEach(function(o) { prevNums[blNorm(o.orderNumber)] = true; });
+
+  var newOrders = cur.filter(function(o)  { return !prevNums[blNorm(o.orderNumber)]; });
+  var cleared   = prev.filter(function(o) { return !curNums[blNorm(o.orderNumber)]; });
+  var stillOpen = cur.filter(function(o)  { return  prevNums[blNorm(o.orderNumber)]; });
+
+  var valChange = blSnapCur.totalValue - blSnapPrev.totalValue;
+  var valCls  = valChange >= 0 ? 'bl-green' : 'bl-red';
+  var valSign = valChange >= 0 ? '+' : '-';
+
+  var panelHtml = '';
+  var panels = { new: newOrders, cleared: cleared, stillopen: stillOpen };
+  ['new', 'cleared', 'stillopen'].forEach(function(type) {
+    panelHtml += '<div class="bl-cpanel ' + (blCmpTab === type ? 'active' : '') + '" id="blcp-' + type + '">' + blCmpTable(panels[type], type) + '</div>';
+  });
+
+  el.innerHTML =
+    '<div class="bl-section-title">🔍 Comparison</div>' +
+    '<div class="bl-section-sub"><strong>' + blEsc(blSnapPrev.filename) + '</strong> &rarr; <strong>' + blEsc(blSnapCur.filename) + '</strong></div>' +
+    '<div class="bl-stats-grid" style="margin-bottom:20px">' +
+      '<div class="bl-stat"><div class="bl-stat-label">New Orders</div><div class="bl-stat-val bl-green">' + newOrders.length + '</div></div>' +
+      '<div class="bl-stat"><div class="bl-stat-label">Cleared</div><div class="bl-stat-val bl-red">' + cleared.length + '</div></div>' +
+      '<div class="bl-stat"><div class="bl-stat-label">Still Open</div><div class="bl-stat-val bl-blue">' + stillOpen.length + '</div></div>' +
+      '<div class="bl-stat"><div class="bl-stat-label">Value Change</div><div class="bl-stat-val ' + valCls + '">' + valSign + blFmtCur(Math.abs(valChange)) + '</div></div>' +
+    '</div>' +
+    '<div class="bl-card">' +
+      '<div class="bl-ctabs">' +
+        '<button class="bl-ctab ' + (blCmpTab === 'new'      ? 'active' : '') + '" onclick="blSwitchCmpTab(\'new\')">New Orders <span class="bl-cbadge bl-cbadge-g">' + newOrders.length + '</span></button>' +
+        '<button class="bl-ctab ' + (blCmpTab === 'cleared'  ? 'active' : '') + '" onclick="blSwitchCmpTab(\'cleared\')">Cleared <span class="bl-cbadge bl-cbadge-r">' + cleared.length + '</span></button>' +
+        '<button class="bl-ctab ' + (blCmpTab === 'stillopen'? 'active' : '') + '" onclick="blSwitchCmpTab(\'stillopen\')">Still Open <span class="bl-cbadge bl-cbadge-b">' + stillOpen.length + '</span></button>' +
+      '</div>' +
+      panelHtml +
+    '</div>';
+}
+
+function blSwitchCmpTab(tab) {
+  blCmpTab = tab;
+  blRenderCompare();
+}
+
+function blCmpTable(orders, type) {
+  if (!orders.length) {
+    var msgs = { new: 'No new orders added.', cleared: 'No orders were cleared.', stillopen: 'No orders carried over.' };
+    return '<div class="bl-empty" style="padding:40px 20px"><div style="font-size:32px;margin-bottom:12px">' + (type === 'cleared' ? '🎉' : '📭') + '</div><div>' + msgs[type] + '</div></div>';
+  }
+  var total = orders.reduce(function(s, o) { return s + (parseFloat(o.orderValue) || 0); }, 0);
+  var trs = orders.map(function(o) {
+    return '<tr>' +
+      '<td><strong>' + blEsc(o.orderNumber || '—') + '</strong></td>' +
+      '<td>' + blEsc(o.customerName || '—') + '</td>' +
+      '<td>' + blEsc(o.product || '—') + '</td>' +
+      '<td>' + blEsc(String(o.quantity != null ? o.quantity : '—')) + '</td>' +
+      '<td style="font-variant-numeric:tabular-nums">' + (o.orderValue != null ? blFmtCur(o.orderValue) : '—') + '</td>' +
+      '<td>' + blFmtDateStr(o.orderDate) + '</td>' +
+      '<td class="' + blDueCls(o.dueDate) + '">' + blFmtDateStr(o.dueDate) + '</td>' +
+      '<td>' + blStatusBadge(o.status) + '</td>' +
+      '<td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + blEsc(o.notes || '') + '">' + blEsc(o.notes || '—') + '</td>' +
+    '</tr>';
+  }).join('');
+  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">' +
+      '<span style="font-size:13px;color:var(--text-secondary)">' + orders.length + ' order' + (orders.length !== 1 ? 's' : '') + ' · Total: <strong style="color:var(--text-primary)">' + blFmtCur(total) + '</strong></span>' +
+      '<button class="bl-btn bl-btn-green" onclick="blExportCmpCSV(\'' + type + '\')">⬇ Export CSV</button>' +
+    '</div>' +
+    '<div style="overflow-x:auto"><table class="bl-table">' +
+      '<thead><tr><th>Order #</th><th>Customer</th><th>Product</th><th>Qty</th><th>Value</th><th>Order Date</th><th>Due Date</th><th>Status</th><th>Notes</th></tr></thead>' +
+      '<tbody>' + trs + '</tbody>' +
+    '</table></div>';
+}
+
+// ─── EXPORT CSV ───────────────────────────────────────────
+function blExportCSV(which) {
+  var snap = which === 'cur' ? blSnapCur : blSnapPrev;
+  if (!snap) return;
+  blDlCSV(snap.orders, 'backlog_' + (which === 'cur' ? 'current' : 'previous') + '_' + blFileDate() + '.csv');
+}
+function blExportCmpCSV(type) {
+  if (!blSnapCur || !blSnapPrev) return;
+  var cur = blSnapCur.orders || [], prev = blSnapPrev.orders || [];
+  var curNums = {}, prevNums = {};
+  cur.forEach(function(o)  { curNums[blNorm(o.orderNumber)]  = true; });
+  prev.forEach(function(o) { prevNums[blNorm(o.orderNumber)] = true; });
+  var rows;
+  if (type === 'new')      rows = cur.filter(function(o)  { return !prevNums[blNorm(o.orderNumber)]; });
+  else if (type === 'cleared') rows = prev.filter(function(o) { return !curNums[blNorm(o.orderNumber)]; });
+  else                     rows = cur.filter(function(o)  { return  prevNums[blNorm(o.orderNumber)]; });
+  blDlCSV(rows, 'backlog_' + type + '_' + blFileDate() + '.csv');
+}
+function blDlCSV(orders, fname) {
+  var keys = ['orderNumber','customerName','product','quantity','orderValue','orderDate','dueDate','status','notes'];
+  var hdrs = ['Order Number','Customer Name','Product','Quantity','Order Value','Order Date','Due Date','Status','Notes'];
+  var rows = orders.map(function(o) {
+    return keys.map(function(k) {
+      var v = String(o[k] != null ? o[k] : '');
+      return (v.includes(',') || v.includes('"') || v.includes('\n')) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    }).join(',');
+  });
+  var csv = [hdrs.join(',')].concat(rows).join('\n');
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = fname;
+  a.click();
+}
+
+// ─── HELPERS ──────────────────────────────────────────────
+function blEsc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function blTrunc(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || ''); }
+function blNorm(s) { return String(s || '').trim().toLowerCase(); }
+function blFileDate() { return new Date().toISOString().slice(0, 10); }
+function blFmtCur(v) { var n = parseFloat(v); return isNaN(n) ? '—' : '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function blFmtDate(d) { if (!d || isNaN(d)) return '—'; return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
+function blFmtTime(d) { if (!d || isNaN(d)) return '—'; return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }); }
+function blFmtDateStr(s) { if (!s) return '—'; var d = new Date(s); return isNaN(d) ? blEsc(String(s)) : blFmtDate(d); }
+function blDueCls(s) {
+  if (!s) return '';
+  var d = new Date(s); if (isNaN(d)) return '';
+  var days = (d - new Date()) / 86400000;
+  return days < 0 ? 'bl-due-over' : days <= 7 ? 'bl-due-soon' : 'bl-due-ok';
+}
+function blStatusBadge(status) {
+  if (!status) return '<span class="bl-badge bl-b-default">—</span>';
+  var s = status.toLowerCase();
+  var cls = s.includes('overdue') ? 'bl-b-overdue' : s.includes('open') ? 'bl-b-open' : s.includes('pending') ? 'bl-b-pending' : (s.includes('complet') || s.includes('closed')) ? 'bl-b-done' : 'bl-b-default';
+  return '<span class="bl-badge ' + cls + '">' + blEsc(status) + '</span>';
+}
+</script>
 
 </body>
 </html>
