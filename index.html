@@ -2624,22 +2624,24 @@
     try {
       var result = await window._sb.from('profiles').select('username, data');
       if (!result.data) return;
+      // Load the legacy contacts array so we can merge into it
+      var legacyContacts = JSON.parse(localStorage.getItem('contacts') || '[]');
       result.data.forEach(function(row) {
         if (!row.username || !row.data) return;
-        var key = 'profile_' + row.username.toLowerCase();
+        var un  = row.username.toLowerCase();
+        var p   = row.data;
+        var key = 'profile_' + un;
         // Always overwrite — Supabase is source of truth for remote profiles
-        localStorage.setItem(key, JSON.stringify(row.data));
-        // Also sync into state.contacts so the contacts page stays current
+        localStorage.setItem(key, JSON.stringify(p));
+        var entry = {
+          id: 'user_' + un, username: un,
+          name: p.fullName || un, email: p.email || '', phone: p.phone || '',
+          dept: p.department || '', role: p.role || '',
+          supervisor: p.supervisorName || '', photo: p.photo || null,
+          isUserProfile: true
+        };
+        // Sync into state.contacts so the contacts page stays current
         if (typeof state !== 'undefined' && Array.isArray(state.contacts)) {
-          var un = row.username.toLowerCase();
-          var p  = row.data;
-          var entry = {
-            id: 'user_' + un, username: un,
-            name: p.fullName || un, email: p.email || '', phone: p.phone || '',
-            dept: p.department || '', role: p.role || '',
-            supervisor: p.supervisorName || '', photo: p.photo || null,
-            isUserProfile: true
-          };
           var found = false;
           for (var i = 0; i < state.contacts.length; i++) {
             if ((state.contacts[i].username || '').toLowerCase() === un) {
@@ -2648,7 +2650,15 @@
           }
           if (!found) state.contacts.push(entry);
         }
+        // Also sync into localStorage.contacts so dept team views see everyone
+        var lIdx = -1;
+        for (var j = 0; j < legacyContacts.length; j++) {
+          if ((legacyContacts[j].username || '').toLowerCase() === un) { lIdx = j; break; }
+        }
+        if (lIdx >= 0) legacyContacts[lIdx] = entry;
+        else legacyContacts.push(entry);
       });
+      localStorage.setItem('contacts', JSON.stringify(legacyContacts));
     } catch(e) { console.warn('_syncAllProfilesFromSb failed:', e); }
   };
 
