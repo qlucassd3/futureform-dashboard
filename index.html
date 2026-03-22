@@ -7806,31 +7806,46 @@ window.mRevokeAdmin=function(un){
   if(typeof toast==='function')toast(un+'\'s admin access revoked.','success');
   _render();
 };
-window.mDeleteUser=function(un){
+window.mDeleteUser=async function(un){
   var me=(localStorage.getItem('current_user')||'').toLowerCase();
   if(un.toLowerCase()===me){
     if(typeof toast==='function')toast('You cannot delete your own account.','error');
     return;
   }
   if(!confirm('Permanently delete account "'+un+'"?\n\nThis removes their login credentials, profile, and contact record. This cannot be undone.'))return;
-  // 1. Remove from auth users list
+  var ql=un.toLowerCase();
+  // 1. Remove from auth users list (localStorage)
   var us=_gU();
-  us=us.filter(function(u){return u.username.toLowerCase()!==un.toLowerCase();});
+  us=us.filter(function(u){return u.username.toLowerCase()!==ql;});
   localStorage.setItem('users',JSON.stringify(us));
   // 2. Remove all their sessions
   var s={};try{s=JSON.parse(localStorage.getItem('auth_sessions')||'{}');}catch(e){}
-  for(var t in s){if(s[t]===un.toLowerCase())delete s[t];}
+  for(var t in s){if(s[t]===ql)delete s[t];}
   localStorage.setItem('auth_sessions',JSON.stringify(s));
   // 3. Remove profile key(s) — scan for any case variant
-  var ql=un.toLowerCase();
   for(var ki=localStorage.length-1;ki>=0;ki--){
     var k=localStorage.key(ki);
     if(k&&k.toLowerCase()==='profile_'+ql)localStorage.removeItem(k);
   }
-  // 4. Remove from contacts list
+  // 4. Remove from contacts list (localStorage)
   var contacts=[];try{contacts=JSON.parse(localStorage.getItem('contacts')||'[]');}catch(e){}
   contacts=contacts.filter(function(c){return(c.username||'').toLowerCase()!==ql;});
   localStorage.setItem('contacts',JSON.stringify(contacts));
+  // 5. Delete from Supabase — profiles table
+  if(window._sb){
+    try{
+      await window._sb.from('profiles').delete().ilike('username', ql);
+    }catch(e){ console.warn('Supabase profiles delete failed:',e); }
+    // 6. Delete from Supabase — auth_users table
+    try{
+      await window._sb.from('auth_users').delete().ilike('username', ql);
+    }catch(e){ console.warn('Supabase auth_users delete failed:',e); }
+    // 7. Also remove from state.contacts and sync to Supabase
+    if(typeof state!=='undefined'&&Array.isArray(state.contacts)){
+      state.contacts=state.contacts.filter(function(c){return(c.username||'').toLowerCase()!==ql;});
+      if(typeof save==='function')save();
+    }
+  }
   if(typeof toast==='function')toast('Account "'+un+'" deleted.','success');
   _render();
 };
