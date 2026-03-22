@@ -2633,7 +2633,8 @@
         var key = 'profile_' + un;
         // Always overwrite — Supabase is source of truth for remote profiles
         localStorage.setItem(key, JSON.stringify(p));
-        var entry = {
+        // state.contacts uses {name, dept} format
+        var stateEntry = {
           id: 'user_' + un, username: un,
           name: p.fullName || un, email: p.email || '', phone: p.phone || '',
           dept: p.department || '', role: p.role || '',
@@ -2645,18 +2646,24 @@
           var found = false;
           for (var i = 0; i < state.contacts.length; i++) {
             if ((state.contacts[i].username || '').toLowerCase() === un) {
-              state.contacts[i] = entry; found = true; break;
+              state.contacts[i] = stateEntry; found = true; break;
             }
           }
-          if (!found) state.contacts.push(entry);
+          if (!found) state.contacts.push(stateEntry);
         }
-        // Also sync into localStorage.contacts so dept team views see everyone
+        // localStorage.contacts uses legacy {fullName, department} format — must match syncProfileToContacts()
+        var legacyEntry = {
+          username: un,
+          fullName: p.fullName || un, email: p.email || '', phone: p.phone || '',
+          department: p.department || '', role: p.role || '',
+          supervisor: p.supervisorName || '', photo: p.photo || null
+        };
         var lIdx = -1;
         for (var j = 0; j < legacyContacts.length; j++) {
           if ((legacyContacts[j].username || '').toLowerCase() === un) { lIdx = j; break; }
         }
-        if (lIdx >= 0) legacyContacts[lIdx] = entry;
-        else legacyContacts.push(entry);
+        if (lIdx >= 0) legacyContacts[lIdx] = legacyEntry;
+        else legacyContacts.push(legacyEntry);
       });
       localStorage.setItem('contacts', JSON.stringify(legacyContacts));
     } catch(e) { console.warn('_syncAllProfilesFromSb failed:', e); }
