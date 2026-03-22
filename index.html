@@ -2767,7 +2767,6 @@
 <div class="breadcrumb-nav" id="breadcrumbNav">
   <button class="breadcrumb-home active" id="btnHome" onclick="navHome()">🏠 Home</button>
   <button class="breadcrumb-home" id="btnMyTasks" onclick="navMyTasks()">📋 My Tasks</button>
-  <button class="breadcrumb-home" id="btnSalesBacklog" onclick="navSalesBacklog()">📦 Sales Backlog</button>
   <span class="breadcrumb-sep" id="breadcrumbSep" style="display:none">›</span>
   <span class="breadcrumb-dept-label" id="breadcrumbDeptLabel" style="cursor:pointer" onclick="if(currentDept)switchDeptTab('overview',document.querySelector('[data-tab=overview]'))"></span>
   <div class="dept-tab-bar" id="deptTabBar" style="display:none">
@@ -2802,10 +2801,6 @@
     <div id="myTasksContent"></div>
   </div>
 
-  <!-- ═══ SALES BACKLOG VIEW ═══ -->
-  <div id="view-sales-backlog" class="view" data-bltab="upload">
-    <div id="blViewRoot"></div>
-  </div>
 
 </div>
 
@@ -3837,7 +3832,7 @@ function navHome() {
   document.getElementById('deptTabBar').style.display        = 'none';
   document.getElementById('btnHome').classList.add('active');
   var bmt = document.getElementById('btnMyTasks'); if (bmt) bmt.classList.remove('active');
-  var bsb = document.getElementById('btnSalesBacklog'); if (bsb) bsb.classList.remove('active');
+
   renderHome();
 }
 
@@ -3851,23 +3846,10 @@ function navMyTasks() {
   document.getElementById('deptTabBar').style.display        = 'none';
   document.getElementById('btnHome').classList.remove('active');
   var bmt = document.getElementById('btnMyTasks'); if (bmt) bmt.classList.add('active');
-  var bsb = document.getElementById('btnSalesBacklog'); if (bsb) bsb.classList.remove('active');
+
   renderMyTasks();
 }
 
-function navSalesBacklog() {
-  if (autoRouteTimer) { clearTimeout(autoRouteTimer); autoRouteTimer = null; }
-  currentDept = null;
-  document.querySelectorAll('.view').forEach(function(v){ v.classList.remove('active'); });
-  document.getElementById('view-sales-backlog').classList.add('active');
-  document.getElementById('breadcrumbSep').style.display     = 'none';
-  document.getElementById('breadcrumbDeptLabel').textContent = '';
-  document.getElementById('deptTabBar').style.display        = 'none';
-  document.getElementById('btnHome').classList.remove('active');
-  var bmt = document.getElementById('btnMyTasks');     if (bmt) bmt.classList.remove('active');
-  var bsb = document.getElementById('btnSalesBacklog'); if (bsb) bsb.classList.add('active');
-  blInit();
-}
 
 function navDept(dept) {
   if (autoRouteTimer) { clearTimeout(autoRouteTimer); autoRouteTimer = null; }
@@ -3885,7 +3867,7 @@ function navDept(dept) {
   document.getElementById('deptTabBar').style.display        = 'flex';
   document.getElementById('btnHome').classList.remove('active');
   var bmt = document.getElementById('btnMyTasks'); if (bmt) bmt.classList.remove('active');
-  var bsb = document.getElementById('btnSalesBacklog'); if (bsb) bsb.classList.remove('active');
+
   var ordersTab = document.getElementById('ordersTab');
   if (ordersTab) ordersTab.style.display = (dept === 'Sales') ? '' : 'none';
   document.querySelectorAll('.dept-tab').forEach(function(t){
@@ -7973,7 +7955,7 @@ async function blExtractOrders(b64, apiKey) {
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-opus-4-5',
       max_tokens: 4096,
       messages: [{
         role: 'user',
