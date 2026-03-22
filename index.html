@@ -1725,6 +1725,10 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script>
+  (function(){ if(typeof emailjs !== 'undefined') emailjs.init({ publicKey: 'sIOH4Tumjle-W5Cb6' }); })();
+</script>
 </head>
 <body>
 
@@ -3444,6 +3448,54 @@ function _rlAttemptsLeft(key) {
   return Math.max(0, 10 - (d.attempts || 0));
 }
 
+// ── EmailJS notification sender ───────────────────────────────────────────
+// Sends an email to a user when they are tagged, assigned, or notified.
+// Looks up the recipient's email from their stored profile.
+async function sendEmailNotif(username, notif) {
+  try {
+    if (typeof emailjs === 'undefined') return;
+    var un = (username || '').toLowerCase();
+    // Look up recipient profile for their email & name
+    var profile = null;
+    try { profile = JSON.parse(localStorage.getItem('profile_' + un) || 'null'); } catch(e) {}
+    // Also check Supabase profiles table if not cached locally
+    if (!profile && window._sb) {
+      try {
+        var res = await window._sb.from('profiles').select('*').ilike('username', un).single();
+        if (res.data) profile = res.data;
+      } catch(e) {}
+    }
+    var toEmail = profile && profile.email;
+    if (!toEmail) return; // no email on file — skip silently
+    var toName  = (profile && (profile.fullName || profile.full_name)) || un;
+    var fromUn  = (localStorage.getItem('current_user') || '').toLowerCase();
+    var fromProfile = null;
+    try { fromProfile = JSON.parse(localStorage.getItem('profile_' + fromUn) || 'null'); } catch(e) {}
+    var fromName = (fromProfile && (fromProfile.fullName || fromProfile.full_name)) || fromUn || 'Someone';
+    // Build subject & action text from notification type
+    var typeMap = {
+      'assigned':  'assigned you a task',
+      'mention':   'mentioned you',
+      'update':    'posted an update',
+      'added':     'added you to a project',
+      'comment':   'commented on a project',
+      'complete':  'marked something complete'
+    };
+    var actionText = typeMap[notif.type] || 'sent you a notification';
+    var subject = 'Future Form Dashboard: ' + fromName + ' ' + actionText;
+    var detail  = notif.message || '';
+    if (notif.projectTitle) detail = 'Project: ' + notif.projectTitle + '\n' + detail;
+    emailjs.send('service_wrjsuhx', 'template_h146m6a', {
+      to_email:  toEmail,
+      to_name:   toName,
+      from_name: fromName,
+      action:    actionText,
+      detail:    detail,
+      subject:   subject
+    }).catch(function(err) { console.warn('EmailJS send failed:', err); });
+  } catch(e) { console.warn('sendEmailNotif error:', e); }
+}
+
 // ── Pull ALL auth users from Supabase and merge into localStorage.users ───
 async function _syncAllUsersFromSb() {
   if (!window._sb) return;
@@ -3568,6 +3620,11 @@ function pushNotif(username, notif) {
   saveNotifs(username, arr);
   // Push to Supabase so recipient sees it on any device
   _pushNotifToSb(username, notif);
+  // Send email notification to the recipient
+  var currentUn = (localStorage.getItem('current_user') || '').toLowerCase();
+  if (username.toLowerCase() !== currentUn) {
+    sendEmailNotif(username, notif);
+  }
 }
 // Notify all project team members except the sender
 function notifyProjectTeam(project, senderUsername, message, type) {
