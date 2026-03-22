@@ -1724,6 +1724,7 @@
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -4270,15 +4271,6 @@ function renderDeptDashboard(dept) {
     // ════════════════════════════════════════════
     content += '<div class="bl-ost-panel" id="blOstUpload" style="' + (_blOrdersSubTab !== 'upload' ? 'display:none' : '') + '">';
 
-    var _apiKey = localStorage.getItem('bl_apikey') || '';
-    if (!_apiKey) {
-      content += '<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);border-radius:10px;padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;gap:12px">' +
-        '<span style="color:#fcd34d;font-size:14px">⚠ No Anthropic API key saved — PDF extraction won\'t work.</span>' +
-        '<div style="flex:1"></div>' +
-        '<button class="btn btn-sm btn-primary" onclick="blOpenKeyModal()">Set API Key</button>' +
-      '</div>';
-    }
-
     content += '<div class="bl-keyoverlay" id="blKeyOverlay" onclick="if(event.target===this)blCloseKeyModal()">' +
       '<div class="bl-keymodal"><div class="bl-modal-title">🔑 Anthropic API Key</div>' +
       '<div class="bl-modal-sub">Stored only in your browser. Used to extract orders from PDF.</div>' +
@@ -4294,16 +4286,16 @@ function renderDeptDashboard(dept) {
         '<div class="bl-dropzone" id="blDropzone" onclick="document.getElementById(\'blFileInput\').click()" ondrop="blOnDrop(event)" ondragover="blOnDragOver(event)" ondragleave="blOnDragLeave(event)">' +
           '<div id="blUploadDefault">' +
             '<div style="font-size:48px;margin-bottom:14px">📄</div>' +
-            '<div class="bl-upload-title">Drop your PDF here</div>' +
-            '<div class="bl-upload-sub">or click to browse · .pdf files only</div>' +
-            '<button class="bl-btn bl-btn-primary" style="margin-top:16px" onclick="event.stopPropagation();document.getElementById(\'blFileInput\').click()">Choose PDF</button>' +
+            '<div class="bl-upload-title">Drop your Excel or CSV here</div>' +
+            '<div class="bl-upload-sub">or click to browse · .xlsx / .xls / .csv</div>' +
+            '<button class="bl-btn bl-btn-primary" style="margin-top:16px" onclick="event.stopPropagation();document.getElementById(\'blFileInput\').click()">Choose File</button>' +
           '</div>' +
           '<div id="blLoadingState" style="display:none;text-align:center">' +
             '<div class="bl-spinner"></div>' +
-            '<div style="font-size:15px;color:var(--text-secondary);font-weight:500">Reading your backlog PDF...</div>' +
+            '<div style="font-size:15px;color:var(--text-secondary);font-weight:500">Reading your spreadsheet...</div>' +
           '</div>' +
         '</div>' +
-        '<input type="file" id="blFileInput" accept=".pdf" style="display:none" onchange="blOnFileSelect(event)">' +
+        '<input type="file" id="blFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="blOnFileSelect(event)">' +
         '<div class="bl-alert bl-alert-err" id="blErrAlert" style="display:none"></div>' +
         '<div class="bl-alert bl-alert-ok"  id="blOkAlert"  style="display:none"></div>' +
       '</div>' +
@@ -7804,16 +7796,16 @@ function blUploadHtml() {
         '<div class="bl-dropzone" id="blDropzone" onclick="document.getElementById(\'blFileInput\').click()" ondrop="blOnDrop(event)" ondragover="blOnDragOver(event)" ondragleave="blOnDragLeave(event)">' +
           '<div id="blUploadDefault">' +
             '<div style="font-size:48px;margin-bottom:14px">📄</div>' +
-            '<div class="bl-upload-title">Drop your PDF here</div>' +
-            '<div class="bl-upload-sub">or click to browse · .pdf files only</div>' +
-            '<button class="bl-btn bl-btn-primary" style="margin-top:16px" onclick="event.stopPropagation();document.getElementById(\'blFileInput\').click()">Choose PDF</button>' +
+            '<div class="bl-upload-title">Drop your Excel or CSV here</div>' +
+            '<div class="bl-upload-sub">or click to browse · .xlsx / .xls / .csv</div>' +
+            '<button class="bl-btn bl-btn-primary" style="margin-top:16px" onclick="event.stopPropagation();document.getElementById(\'blFileInput\').click()">Choose File</button>' +
           '</div>' +
           '<div id="blLoadingState" style="display:none;text-align:center">' +
             '<div class="bl-spinner"></div>' +
-            '<div style="font-size:15px;color:var(--text-secondary);font-weight:500">Reading your backlog PDF...</div>' +
+            '<div style="font-size:15px;color:var(--text-secondary);font-weight:500">Reading your spreadsheet...</div>' +
           '</div>' +
         '</div>' +
-        '<input type="file" id="blFileInput" accept=".pdf" style="display:none" onchange="blOnFileSelect(event)">' +
+        '<input type="file" id="blFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="blOnFileSelect(event)">' +
         '<div class="bl-alert bl-alert-err" id="blErrAlert" style="display:none"></div>' +
         '<div class="bl-alert bl-alert-ok"  id="blOkAlert"  style="display:none"></div>' +
       '</div>' +
@@ -7891,89 +7883,170 @@ function blOnFileSelect(e) {
   e.target.value = '';
 }
 
-async function blProcessFile(file) {
-  if (!file.name.toLowerCase().endsWith('.pdf')) { blShowAlert('err', 'Please upload a PDF file (.pdf only).'); return; }
-  var apiKey = localStorage.getItem('bl_apikey') || '';
-  if (!apiKey) { blShowAlert('err', 'No API key set. Click ⚙ API Key button to add it.'); return; }
+function blProcessFile(file) {
+  var name = file.name.toLowerCase();
+  var ok = name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.csv');
+  if (!ok) { blShowAlert('err', 'Please upload an Excel or CSV file (.xlsx, .xls, or .csv).'); return; }
   blClearAlerts();
   blSetLoading(true);
-  try {
-    var b64    = await blToBase64(file);
-    var orders = await blExtractOrders(b64, apiKey);
 
-    // Rotate snapshots — previous gets replaced, current becomes previous
-    blSnapPrev = blSnapCur;
-    if (blSnapPrev) localStorage.setItem('sales_backlog_previous', JSON.stringify(blSnapPrev));
-    else            localStorage.removeItem('sales_backlog_previous');
-
-    var totalValue = orders.reduce(function(s, o) { return s + (parseFloat(o.orderValue) || 0); }, 0);
-    blSnapCur = {
-      uploadedAt:  new Date().toISOString(),
-      uploadedBy:  localStorage.getItem('current_user') || 'Unknown',
-      filename:    file.name,
-      totalOrders: orders.length,
-      totalValue:  totalValue,
-      orders:      orders
-    };
-    localStorage.setItem('sales_backlog_current', JSON.stringify(blSnapCur));
+  var reader = new FileReader();
+  reader.onerror = function() {
     blSetLoading(false);
-    blShowAlert('ok', '✓ Extracted ' + orders.length + ' orders from "' + file.name + '" · Total: ' + blFmtCur(totalValue));
-    // If we're inside the Sales dept tab, re-render to pick up live data
-    if (typeof renderDeptDashboard === 'function' && typeof currentDept !== 'undefined' && currentDept === 'Sales') {
-      _blOrdersSubTab = 'backlog'; // jump to the Backlog view to show the fresh data
-      setTimeout(function() { renderDeptDashboard('Sales'); }, 400);
-    } else {
-      // Standalone backlog page — refresh snapshot cards in place
-      var cards = document.querySelectorAll('.bl-snap-card');
-      if (cards[0]) cards[0].outerHTML = blSnapInfoCard('cur',  blSnapCur);
-      cards = document.querySelectorAll('.bl-snap-card');
-      if (cards[1]) cards[1].outerHTML = blSnapInfoCard('prev', blSnapPrev);
+    blShowAlert('err', 'Could not read the file. Please try again.');
+  };
+  reader.onload = function(e) {
+    try {
+      var orders = blParseSpreadsheet(e.target.result, name);
+      if (!orders.length) throw new Error('No rows found');
+
+      // Rotate snapshots
+      blSnapPrev = blSnapCur;
+      if (blSnapPrev) localStorage.setItem('sales_backlog_previous', JSON.stringify(blSnapPrev));
+      else            localStorage.removeItem('sales_backlog_previous');
+
+      var totalValue = orders.reduce(function(s, o) { return s + (parseFloat(o.orderValue) || 0); }, 0);
+      blSnapCur = {
+        uploadedAt:  new Date().toISOString(),
+        uploadedBy:  localStorage.getItem('current_user') || 'Unknown',
+        filename:    file.name,
+        totalOrders: orders.length,
+        totalValue:  totalValue,
+        orders:      orders
+      };
+      localStorage.setItem('sales_backlog_current', JSON.stringify(blSnapCur));
+      blSetLoading(false);
+      blShowAlert('ok', '✓ Loaded ' + orders.length + ' orders from "' + file.name + '" · Total: ' + blFmtCur(totalValue));
+
+      // Re-render Sales dept tab to show fresh data
+      if (typeof renderDeptDashboard === 'function' && typeof currentDept !== 'undefined' && currentDept === 'Sales') {
+        _blOrdersSubTab = 'backlog';
+        setTimeout(function() { renderDeptDashboard('Sales'); }, 300);
+      } else {
+        var cards = document.querySelectorAll('.bl-snap-card');
+        if (cards[0]) cards[0].outerHTML = blSnapInfoCard('cur',  blSnapCur);
+        cards = document.querySelectorAll('.bl-snap-card');
+        if (cards[1]) cards[1].outerHTML = blSnapInfoCard('prev', blSnapPrev);
+      }
+    } catch(err) {
+      blSetLoading(false);
+      blShowAlert('err', 'Could not read the spreadsheet. Make sure it has column headers and order data.');
+      console.error(err);
     }
-  } catch(err) {
-    blSetLoading(false);
-    blShowAlert('err', 'Could not read PDF. Please check the file and try again.');
-    console.error(err);
+  };
+
+  // CSV = text, Excel = binary
+  if (name.endsWith('.csv')) reader.readAsText(file);
+  else reader.readAsArrayBuffer(file);
+}
+
+// ─── EXCEL / CSV PARSER ───────────────────────────────────
+function blParseSpreadsheet(data, filename) {
+  if (typeof XLSX === 'undefined') throw new Error('XLSX library not loaded');
+
+  var wb;
+  if (filename.endsWith('.csv')) {
+    wb = XLSX.read(data, { type: 'string' });
+  } else {
+    var arr = new Uint8Array(data);
+    wb = XLSX.read(arr, { type: 'array' });
   }
+
+  // Use the first sheet
+  var ws   = wb.Sheets[wb.SheetNames[0]];
+  var rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  if (rows.length < 2) throw new Error('Sheet is empty');
+
+  // Find header row (first row with more than 2 non-empty cells)
+  var headerRowIdx = 0;
+  for (var i = 0; i < Math.min(rows.length, 5); i++) {
+    var filled = rows[i].filter(function(c){ return String(c).trim() !== ''; }).length;
+    if (filled > 2) { headerRowIdx = i; break; }
+  }
+  var headers = rows[headerRowIdx].map(function(h){ return String(h).trim(); });
+
+  // Smart column mapping — tries to match common header names
+  var colMap = blMapColumns(headers);
+
+  // Parse data rows
+  var orders = [];
+  for (var r = headerRowIdx + 1; r < rows.length; r++) {
+    var row = rows[r];
+    // Skip fully empty rows
+    if (row.every(function(c){ return String(c).trim() === ''; })) continue;
+
+    function get(field) {
+      var idx = colMap[field];
+      return (idx !== undefined && idx !== null) ? String(row[idx] != null ? row[idx] : '').trim() : '';
+    }
+
+    var rawVal = get('orderValue').replace(/[$,\s]/g, '');
+    var orderValue = parseFloat(rawVal) || null;
+    var qty = parseInt(get('quantity')) || null;
+
+    var order = {
+      orderNumber:  get('orderNumber')  || null,
+      customerName: get('customerName') || null,
+      orderValue:   orderValue,
+      orderDate:    blExcelDate(get('orderDate'), row, colMap['orderDate']),
+      dueDate:      blExcelDate(get('dueDate'),   row, colMap['dueDate']),
+      status:       get('status')       || null,
+      product:      get('product')      || null,
+      quantity:     qty,
+      notes:        get('notes')        || null
+    };
+
+    // Only include rows that have at least an order number OR customer OR value
+    if (order.orderNumber || order.customerName || order.orderValue) {
+      orders.push(order);
+    }
+  }
+  return orders;
 }
 
-function blToBase64(file) {
-  return new Promise(function(res, rej) {
-    var r = new FileReader();
-    r.onload = function(e) { res(e.target.result.split(',')[1]); };
-    r.onerror = rej;
-    r.readAsDataURL(file);
+// Maps header strings to field names using fuzzy matching
+function blMapColumns(headers) {
+  var patterns = {
+    orderNumber:  [/order\s*(number|num|#|no\.?|id)$/i, /^(order|po|so|wo)[\s#_-]?(num|no|#)?$/i, /^order$/i],
+    customerName: [/customer/i, /client/i, /account\s*name/i, /bill\s*to/i, /company/i],
+    orderValue:   [/order\s*value/i, /amount/i, /total/i, /price/i, /value/i, /\$\s*amount/i, /ext(ended)?\s*(price|cost)/i],
+    orderDate:    [/order\s*date/i, /date\s*order/i, /placed/i, /created/i],
+    dueDate:      [/due\s*date/i, /ship\s*date/i, /need\s*by/i, /required\s*date/i, /delivery/i, /promised/i, /sched/i],
+    status:       [/^status$/i, /order\s*status/i, /state$/i],
+    product:      [/^(product|item|part|sku|desc(ription)?)$/i, /item\s*(no|#|code)/i, /part\s*(no|#)/i],
+    quantity:     [/^qty$/i, /^quantity$/i, /bal(ance)?\s*qty/i, /ord(ered)?\s*qty/i, /open\s*qty/i],
+    notes:        [/notes?$/i, /comments?/i, /remarks?/i, /memo/i]
+  };
+
+  var map = {};
+  headers.forEach(function(h, i) {
+    var hs = String(h).trim();
+    if (!hs) return;
+    Object.keys(patterns).forEach(function(field) {
+      if (map[field] !== undefined) return; // already matched
+      var pats = patterns[field];
+      for (var p = 0; p < pats.length; p++) {
+        if (pats[p].test(hs)) { map[field] = i; break; }
+      }
+    });
   });
+  return map;
 }
 
-async function blExtractOrders(b64, apiKey) {
-  var resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-opus-4-5',
-      max_tokens: 4096,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } },
-          { type: 'text', text: 'Extract all open orders from this PDF into a JSON array. Each order should have these fields: orderNumber, customerName, orderValue, orderDate, dueDate, status, product, quantity, notes. Return ONLY a valid JSON array, no other text or markdown.' }
-        ]
-      }]
-    })
-  });
-  if (!resp.ok) throw new Error('API ' + resp.status + ': ' + (await resp.text()));
-  var data = await resp.json();
-  var txt = (data.content[0].text || '').trim();
-  var m = txt.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (m) txt = m[1].trim();
-  var arr = JSON.parse(txt);
-  if (!Array.isArray(arr)) throw new Error('Response was not an array');
-  return arr;
+// Handles Excel serial dates and string dates
+function blExcelDate(val, row, colIdx) {
+  if (!val) return null;
+  // If it's a number it might be an Excel serial date
+  var n = parseFloat(val);
+  if (!isNaN(n) && n > 1000 && n < 100000) {
+    // Convert Excel serial to JS date
+    var d = new Date(Math.round((n - 25569) * 86400 * 1000));
+    if (!isNaN(d)) return d.toISOString().slice(0, 10);
+  }
+  // Try parsing as a regular date string
+  var parsed = new Date(val);
+  if (!isNaN(parsed)) return parsed.toISOString().slice(0, 10);
+  return val; // return raw if unparseable
 }
 
 // ─── LOADING / ALERTS ─────────────────────────────────────
