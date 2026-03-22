@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sales Open Orders Backlog</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--border:#30363d;
+  --primary:#f97316;--primary-dim:rgba(249,115,22,.15);
+  --success:#22c55e;--success-dim:rgba(34,197,94,.12);
+  --warning:#f59e0b;--warning-dim:rgba(245,158,11,.12);
+  --danger:#ef4444;--danger-dim:rgba(239,68,68,.12);
+  --blue:#3b82f6;--blue-dim:rgba(59,130,246,.12);
+  --text:#e6edf3;--muted:#8b949e;
+}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+
+/* HEADER */
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.logo{display:flex;align-items:center;gap:10px}
+.logo-icon{font-size:26px}
+.logo-text{font-weight:700;font-size:16px}
+.logo-sub{font-size:11px;color:var(--muted)}
+.header-right{display:flex;align-items:center;gap:10px}
+.user-badge{background:var(--primary-dim);color:var(--primary);border:1px solid rgba(249,115,22,.3);padding:4px 12px;border-radius:20px;font-size:13px;font-weight:600}
+.icon-btn{background:none;border:1px solid var(--border);color:var(--muted);width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:16px;transition:.2s;display:flex;align-items:center;justify-content:center}
+.icon-btn:hover{border-color:var(--primary);color:var(--primary)}
+
+/* NAV */
+.nav{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:2px}
+.nav-tab{padding:13px 18px;border:none;background:none;color:var(--muted);cursor:pointer;font-size:14px;font-weight:500;border-bottom:2px solid transparent;transition:.2s;white-space:nowrap}
+.nav-tab:hover{color:var(--text)}
+.nav-tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+
+/* MAIN */
+.main{padding:24px;max-width:1400px;margin:0 auto}
+.view{display:none}.view.active{display:block}
+
+/* SECTION TITLES */
+.section-title{font-size:20px;font-weight:700;margin-bottom:4px}
+.section-sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+
+/* CARDS */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+@media(max-width:760px){.two-col{grid-template-columns:1fr}}
+
+/* UPLOAD ZONE */
+.upload-zone{border:2px dashed var(--border);border-radius:12px;padding:56px 32px;text-align:center;cursor:pointer;transition:.2s;background:var(--surface);position:relative;min-height:260px;display:flex;align-items:center;justify-content:center}
+.upload-zone:hover,.upload-zone.drag-over{border-color:var(--primary);background:var(--primary-dim)}
+.upload-default{text-align:center}
+.upload-icon-big{font-size:48px;margin-bottom:14px}
+.upload-title{font-size:18px;font-weight:600;margin-bottom:6px}
+.upload-sub{color:var(--muted);font-size:14px}
+.btn-upload{margin-top:18px;background:var(--primary);color:#fff;border:none;padding:10px 26px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .2s}
+.btn-upload:hover{opacity:.85}
+#fileInput{display:none}
+
+/* LOADING */
+.loading-state{display:none;text-align:center}
+.loading-state.show{display:block}
+.spinner{width:44px;height:44px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-msg{font-size:15px;color:var(--muted);font-weight:500}
+
+/* ALERTS */
+.alert{padding:12px 16px;border-radius:8px;font-size:14px;margin-top:14px;display:none}
+.alert.show{display:block}
+.alert-err{background:var(--danger-dim);border:1px solid rgba(239,68,68,.3);color:#fca5a5}
+.alert-ok{background:var(--success-dim);border:1px solid rgba(34,197,94,.3);color:#86efac}
+
+/* SNAPSHOT INFO CARD */
+.snap-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px}
+.snap-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+.snap-label.cur{color:var(--primary)}.snap-label.prev{color:var(--blue)}
+.snap-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px}
+.snap-row:last-child{border-bottom:none}
+.snap-key{color:var(--muted)}
+.snap-val{font-weight:600;text-align:right;max-width:58%;word-break:break-all}
+.snap-val.orange{color:var(--primary)}
+.no-snap{color:var(--muted);font-size:13px;font-style:italic}
+
+/* STATS GRID */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+.stat-card{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+.stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+.stat-val{font-size:17px;font-weight:700}
+.stat-val.orange{color:var(--primary)}.stat-val.green{color:var(--success)}.stat-val.red{color:var(--danger)}.stat-val.blue{color:var(--blue)}
+
+/* TABLE */
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;cursor:pointer;user-select:none;white-space:nowrap}
+th:hover{color:var(--text)}
+th.sorted{color:var(--primary)}
+td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02)}
+.table-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.table-title{font-size:15px;font-weight:600}
+.notes-cell{max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mono{font-variant-numeric:tabular-nums}
+
+/* DUE DATE COLORS */
+.due-over{color:var(--danger);font-weight:600}
+.due-soon{color:var(--warning);font-weight:600}
+.due-ok{color:var(--success)}
+
+/* STATUS BADGE */
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;text-transform:capitalize}
+.b-open{background:var(--blue-dim);color:#93c5fd;border:1px solid rgba(59,130,246,.3)}
+.b-pending{background:var(--warning-dim);color:#fcd34d;border:1px solid rgba(245,158,11,.3)}
+.b-overdue{background:var(--danger-dim);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
+.b-done{background:var(--success-dim);color:#86efac;border:1px solid rgba(34,197,94,.3)}
+.b-default{background:rgba(139,148,158,.12);color:var(--muted);border:1px solid rgba(139,148,158,.2)}
+
+/* COMPARE TABS */
+.ctabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:18px}
+.ctab{padding:10px 16px;border:none;background:none;color:var(--muted);cursor:pointer;font-size:14px;font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.2s;display:flex;align-items:center;gap:7px}
+.ctab:hover{color:var(--text)}
+.ctab.active{color:var(--primary);border-bottom-color:var(--primary)}
+.cbadge{border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700}
+.cbadge.g{background:var(--success-dim);color:#86efac}
+.cbadge.r{background:var(--danger-dim);color:#fca5a5}
+.cbadge.b{background:var(--blue-dim);color:#93c5fd}
+.cpanel{display:none}.cpanel.active{display:block}
+
+/* EMPTY */
+.empty{text-align:center;padding:56px 20px;color:var(--muted)}
+.empty-icon{font-size:40px;margin-bottom:12px}
+.empty-title{font-size:16px;font-weight:600;margin-bottom:6px;color:var(--text)}
+
+/* BUTTONS */
+.btn{padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:.2s;display:inline-flex;align-items:center;gap:6px}
+.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{opacity:.85}
+.btn-ghost{background:none;border:1px solid var(--border);color:var(--muted)}.btn-ghost:hover{border-color:var(--muted);color:var(--text)}
+.btn-green{background:var(--success-dim);border:1px solid rgba(34,197,94,.3);color:#86efac}.btn-green:hover{background:rgba(34,197,94,.2)}
+
+/* MODAL */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:none;align-items:center;justify-content:center}
+.overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;width:100%;max-width:430px}
+.modal-title{font-size:20px;font-weight:700;margin-bottom:6px}
+.modal-sub{color:var(--muted);font-size:14px;margin-bottom:22px}
+.form-group{margin-bottom:16px}
+.form-label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:5px}
+.form-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:14px;outline:none;transition:.2s}
+.form-input:focus{border-color:var(--primary)}
+.form-hint{font-size:12px;color:var(--muted);margin-top:4px}
+.form-hint a{color:var(--primary)}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:22px}
+</style>
+</head>
+<body>
+
+<!-- Name modal (first run) -->
+<div class="overlay" id="nameModal">
+  <div class="modal">
+    <div class="modal-title">👋 Welcome</div>
+    <div class="modal-sub">Enter your name — it will be saved with each upload so you know who loaded each snapshot.</div>
+    <div class="form-group">
+      <label class="form-label">Your Name</label>
+      <input class="form-input" id="nameInput" type="text" placeholder="e.g. John Smith" maxlength="60">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="saveName()">Get Started</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div class="overlay" id="settingsModal">
+  <div class="modal">
+    <div class="modal-title">⚙️ Settings</div>
+    <div class="modal-sub">Your API key is stored only in this browser — never sent anywhere except Anthropic.</div>
+    <div class="form-group">
+      <label class="form-label">Anthropic API Key</label>
+      <input class="form-input" id="apiKeyInput" type="password" placeholder="sk-ant-api03-...">
+      <div class="form-hint">Get yours at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> → API Keys</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Your Name</label>
+      <input class="form-input" id="settingsName" type="text" placeholder="Display name">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Header -->
+<header class="header">
+  <div class="logo">
+    <span class="logo-icon">📦</span>
+    <div>
+      <div class="logo-text">Sales Open Orders</div>
+      <div class="logo-sub">Backlog Tracker</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="user-badge" id="userBadge">—</span>
+    <button class="icon-btn" onclick="openSettings()" title="Settings">⚙️</button>
+  </div>
+</header>
+
+<!-- Nav -->
+<nav class="nav">
+  <button class="nav-tab active" data-view="upload" onclick="go('upload')">📤 Upload</button>
+  <button class="nav-tab" data-view="current" onclick="go('current')">📋 Current Backlog</button>
+  <button class="nav-tab" data-view="previous" onclick="go('previous')">📂 Previous Backlog</button>
+  <button class="nav-tab" data-view="compare" onclick="go('compare')">🔍 Comparison</button>
+</nav>
+
+<main class="main">
+
+  <!-- UPLOAD VIEW -->
+  <div class="view active" id="view-upload">
+    <div class="section-title">Upload Backlog PDF</div>
+    <div class="section-sub">AI reads your PDF and extracts all order data automatically. The current snapshot moves to Previous and the new file becomes Current.</div>
+    <div class="two-col">
+
+      <div>
+        <div class="upload-zone" id="uploadZone"
+          onclick="document.getElementById('fileInput').click()"
+          ondrop="onDrop(event)" ondragover="onDragOver(event)" ondragleave="onDragLeave(event)">
+          <div class="upload-default" id="uploadDefault">
+            <div class="upload-icon-big">📄</div>
+            <div class="upload-title">Drop your PDF here</div>
+            <div class="upload-sub">or click to browse</div>
+            <div class="upload-sub" style="margin-top:6px;font-size:12px;">Accepts .pdf files only</div>
+            <button class="btn-upload" onclick="event.stopPropagation();document.getElementById('fileInput').click()">Choose PDF</button>
+          </div>
+          <div class="loading-state" id="loadingState">
+            <div class="spinner"></div>
+            <div class="loading-msg">Reading your backlog PDF...</div>
+          </div>
+        </div>
+        <input type="file" id="fileInput" accept=".pdf" onchange="onFileSelect(event)">
+        <div class="alert alert-err" id="errAlert"></div>
+        <div class="alert alert-ok" id="okAlert"></div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="snap-card">
+          <div class="snap-label cur">● Current Snapshot</div>
+          <div id="curSnapInfo"></div>
+        </div>
+        <div class="snap-card">
+          <div class="snap-label prev">● Previous Snapshot</div>
+          <div id="prevSnapInfo"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CURRENT BACKLOG VIEW -->
+  <div class="view" id="view-current">
+    <div id="curContent"></div>
+  </div>
+
+  <!-- PREVIOUS BACKLOG VIEW -->
+  <div class="view" id="view-previous">
+    <div id="prevContent"></div>
+  </div>
+
+  <!-- COMPARISON VIEW -->
+  <div class="view" id="view-compare">
+    <div id="cmpContent"></div>
+  </div>
+
+</main>
+
+<script>
+// ─── STATE ────────────────────────────────────────────────
+let username = localStorage.getItem('bl_username') || '';
+let apiKey   = localStorage.getItem('bl_apikey')   || '';
+let snapCur  = null;
+let snapPrev = null;
+let sorts    = {};   // { cur: {col,dir}, prev: {col,dir} }
+let cmpTab   = 'new';
+
+function loadSnaps() {
+  try { snapCur  = JSON.parse(localStorage.getItem('sales_backlog_current'))  || null; } catch(e) { snapCur  = null; }
+  try { snapPrev = JSON.parse(localStorage.getItem('sales_backlog_previous')) || null; } catch(e) { snapPrev = null; }
+}
+
+// ─── INIT ────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  loadSnaps();
+  updateBadge();
+  renderSnapInfo();
+  if (!username) document.getElementById('nameModal').classList.add('open');
+});
+
+// ─── BADGE ───────────────────────────────────────────────
+function updateBadge() {
+  document.getElementById('userBadge').textContent = username || 'Set your name';
+}
+
+// ─── NAME MODAL ──────────────────────────────────────────
+function saveName() {
+  const v = document.getElementById('nameInput').value.trim();
+  if (!v) { alert('Please enter your name.'); return; }
+  username = v;
+  localStorage.setItem('bl_username', v);
+  document.getElementById('nameModal').classList.remove('open');
+  updateBadge();
+}
+document.getElementById('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') saveName(); });
+
+// ─── SETTINGS ────────────────────────────────────────────
+function openSettings() {
+  document.getElementById('apiKeyInput').value  = apiKey;
+  document.getElementById('settingsName').value = username;
+  document.getElementById('settingsModal').classList.add('open');
+}
+function closeSettings() { document.getElementById('settingsModal').classList.remove('open'); }
+function saveSettings() {
+  const k = document.getElementById('apiKeyInput').value.trim();
+  const n = document.getElementById('settingsName').value.trim();
+  if (k) { apiKey = k; localStorage.setItem('bl_apikey', k); }
+  if (n) { username = n; localStorage.setItem('bl_username', n); updateBadge(); }
+  closeSettings();
+}
+
+// ─── NAV ─────────────────────────────────────────────────
+function go(view) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('view-' + view).classList.add('active');
+  document.querySelector('[data-view="' + view + '"]').classList.add('active');
+  if (view === 'current')  renderBacklog('cur');
+  if (view === 'previous') renderBacklog('prev');
+  if (view === 'compare')  renderCompare();
+}
+
+// ─── DRAG / DROP ─────────────────────────────────────────
+function onDragOver(e) { e.preventDefault(); document.getElementById('uploadZone').classList.add('drag-over'); }
+function onDragLeave()  { document.getElementById('uploadZone').classList.remove('drag-over'); }
+function onDrop(e) {
+  e.preventDefault();
+  document.getElementById('uploadZone').classList.remove('drag-over');
+  if (e.dataTransfer.files.length) processFile(e.dataTransfer.files[0]);
+}
+function onFileSelect(e) {
+  if (e.target.files.length) processFile(e.target.files[0]);
+  e.target.value = '';
+}
+
+// ─── PROCESS FILE ────────────────────────────────────────
+async function processFile(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    showAlert('err', 'Please upload a PDF file (.pdf only).');
+    return;
+  }
+  if (!apiKey) {
+    showAlert('err', 'No API key saved. Click ⚙️ in the top right to add your Anthropic API key.');
+    return;
+  }
+  clearAlerts();
+  setLoading(true);
+
+  try {
+    const b64 = await toBase64(file);
+    const orders = await extractOrders(b64);
+
+    // Rotate snapshots
+    snapPrev = snapCur;
+    if (snapPrev) localStorage.setItem('sales_backlog_previous', JSON.stringify(snapPrev));
+    else           localStorage.removeItem('sales_backlog_previous');
+
+    const totalValue = orders.reduce((s, o) => s + (parseFloat(o.orderValue) || 0), 0);
+    snapCur = {
+      uploadedAt:   new Date().toISOString(),
+      uploadedBy:   username || '—',
+      filename:     file.name,
+      totalOrders:  orders.length,
+      totalValue:   totalValue,
+      orders:       orders
+    };
+    localStorage.setItem('sales_backlog_current', JSON.stringify(snapCur));
+
+    setLoading(false);
+    showAlert('ok', `✓ Extracted ${orders.length} orders from "${file.name}" · Total value: ${fmtCur(totalValue)}`);
+    renderSnapInfo();
+
+  } catch(err) {
+    setLoading(false);
+    showAlert('err', 'Could not read PDF. Please check the file and try again.');
+    console.error(err);
+  }
+}
+
+function toBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = e => res(e.target.result.split(',')[1]);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+async function extractOrders(b64) {
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4096,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: b64 }
+          },
+          {
+            type: 'text',
+            text: `Extract all open orders from this PDF into a JSON array. Each order should have these fields: orderNumber, customerName, orderValue, orderDate, dueDate, status, product, quantity, notes. Return ONLY a valid JSON array, no other text or markdown.`
+          }
+        ]
+      }]
+    })
+  });
+
+  if (!resp.ok) throw new Error('API error ' + resp.status + ': ' + await resp.text());
+
+  const data = await resp.json();
+  let txt = (data.content[0].text || '').trim();
+
+  // Strip markdown code fences if present
+  const m = txt.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (m) txt = m[1].trim();
+
+  const arr = JSON.parse(txt);
+  if (!Array.isArray(arr)) throw new Error('Response was not an array');
+  return arr;
+}
+
+// ─── LOADING / ALERTS ────────────────────────────────────
+function setLoading(on) {
+  document.getElementById('loadingState').classList.toggle('show', on);
+  document.getElementById('uploadDefault').style.display = on ? 'none' : '';
+  document.getElementById('uploadZone').style.cursor = on ? 'default' : 'pointer';
+}
+function showAlert(type, msg) {
+  clearAlerts();
+  const el = document.getElementById(type === 'err' ? 'errAlert' : 'okAlert');
+  el.textContent = msg;
+  el.classList.add('show');
+}
+function clearAlerts() {
+  document.getElementById('errAlert').classList.remove('show');
+  document.getElementById('okAlert').classList.remove('show');
+}
+
+// ─── SNAPSHOT INFO PANEL ─────────────────────────────────
+function renderSnapInfo() {
+  renderSnapCard('curSnapInfo',  snapCur);
+  renderSnapCard('prevSnapInfo', snapPrev);
+}
+
+function renderSnapCard(id, snap) {
+  const el = document.getElementById(id);
+  if (!snap) { el.innerHTML = '<p class="no-snap">No snapshot loaded yet.</p>'; return; }
+  const d = new Date(snap.uploadedAt);
+  el.innerHTML = `
+    <div class="snap-row"><span class="snap-key">Date</span><span class="snap-val">${fmtDate(d)}</span></div>
+    <div class="snap-row"><span class="snap-key">Time</span><span class="snap-val">${fmtTime(d)}</span></div>
+    <div class="snap-row"><span class="snap-key">Uploaded by</span><span class="snap-val">${esc(snap.uploadedBy)}</span></div>
+    <div class="snap-row"><span class="snap-key">File</span><span class="snap-val" title="${esc(snap.filename)}">${esc(trunc(snap.filename,26))}</span></div>
+    <div class="snap-row"><span class="snap-key">Total orders</span><span class="snap-val">${snap.totalOrders}</span></div>
+    <div class="snap-row"><span class="snap-key">Total value</span><span class="snap-val orange">${fmtCur(snap.totalValue)}</span></div>
+  `;
+}
+
+// ─── BACKLOG TABLE VIEW ───────────────────────────────────
+function renderBacklog(which) {
+  const snap = which === 'cur' ? snapCur : snapPrev;
+  const cid  = which === 'cur' ? 'curContent' : 'prevContent';
+  const el   = document.getElementById(cid);
+  const label = which === 'cur' ? 'Current' : 'Previous';
+  const icon  = which === 'cur' ? '📋' : '📂';
+
+  if (!snap) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">${icon}</div><div class="empty-title">No ${label.toLowerCase()} snapshot</div><div>Upload a PDF on the Upload tab to load data.</div></div>`;
+    return;
+  }
+
+  const sk  = sorts[which] || {};
+  let orders = [...snap.orders];
+  if (sk.col) {
+    orders.sort((a, b) => {
+      let va = a[sk.col] ?? '', vb = b[sk.col] ?? '';
+      if (sk.col === 'orderValue' || sk.col === 'quantity') { va = parseFloat(va)||0; vb = parseFloat(vb)||0; }
+      else { va = String(va).toLowerCase(); vb = String(vb).toLowerCase(); }
+      return (va < vb ? -1 : va > vb ? 1 : 0) * (sk.dir === 'asc' ? 1 : -1);
+    });
+  }
+
+  const cols = [
+    {k:'orderNumber',  l:'Order #'},
+    {k:'customerName', l:'Customer'},
+    {k:'product',      l:'Product'},
+    {k:'quantity',     l:'Qty'},
+    {k:'orderValue',   l:'Value'},
+    {k:'orderDate',    l:'Order Date'},
+    {k:'dueDate',      l:'Due Date'},
+    {k:'status',       l:'Status'},
+    {k:'notes',        l:'Notes'}
+  ];
+
+  const ths = cols.map(c => {
+    const sorted = sk.col === c.k;
+    const ico = sorted ? (sk.dir === 'asc' ? ' ▲' : ' ▼') : ' ⇅';
+    return `<th class="${sorted?'sorted':''}" onclick="sortTable('${which}','${c.k}')">${c.l}<span style="opacity:.5">${ico}</span></th>`;
+  }).join('');
+
+  const trs = orders.map(o => `
+    <tr>
+      <td><strong>${esc(o.orderNumber||'—')}</strong></td>
+      <td>${esc(o.customerName||'—')}</td>
+      <td>${esc(o.product||'—')}</td>
+      <td>${esc(String(o.quantity??'—'))}</td>
+      <td class="mono">${o.orderValue!=null?fmtCur(o.orderValue):'—'}</td>
+      <td>${fmtDateStr(o.orderDate)}</td>
+      <td class="${dueClass(o.dueDate)}">${fmtDateStr(o.dueDate)}</td>
+      <td>${statusBadge(o.status)}</td>
+      <td class="notes-cell" title="${esc(o.notes||'')}">${esc(o.notes||'—')}</td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <div class="section-title">${icon} ${label} Backlog</div>
+    <div class="section-sub">Snapshot from ${fmtDate(new Date(snap.uploadedAt))} · ${snap.totalOrders} orders · ${fmtCur(snap.totalValue)}</div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-label">Date</div><div class="stat-val">${fmtDate(new Date(snap.uploadedAt))}</div></div>
+      <div class="stat-card"><div class="stat-label">Time</div><div class="stat-val">${fmtTime(new Date(snap.uploadedAt))}</div></div>
+      <div class="stat-card"><div class="stat-label">Uploaded By</div><div class="stat-val">${esc(snap.uploadedBy||'—')}</div></div>
+      <div class="stat-card"><div class="stat-label">File</div><div class="stat-val" title="${esc(snap.filename)}" style="font-size:13px">${esc(trunc(snap.filename,22))}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Orders</div><div class="stat-val orange">${snap.totalOrders}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Value</div><div class="stat-val orange">${fmtCur(snap.totalValue)}</div></div>
+    </div>
+    <div class="card">
+      <div class="table-top">
+        <span class="table-title">Order Details</span>
+        <button class="btn btn-green" onclick="exportCSV('${which}')">⬇ Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>${ths}</tr></thead>
+          <tbody>${trs||'<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--muted)">No orders found</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function sortTable(which, col) {
+  const s = sorts[which] || {};
+  sorts[which] = { col, dir: s.col === col && s.dir === 'asc' ? 'desc' : 'asc' };
+  renderBacklog(which);
+}
+
+// ─── COMPARISON VIEW ─────────────────────────────────────
+function renderCompare() {
+  const el = document.getElementById('cmpContent');
+
+  if (!snapCur && !snapPrev) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">No snapshots to compare</div><div>Upload at least two PDFs to see a comparison.</div></div>`;
+    return;
+  }
+  if (!snapPrev) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">Only one snapshot loaded</div><div>Upload a second PDF to enable comparison.</div></div>`;
+    return;
+  }
+
+  const cur  = snapCur.orders  || [];
+  const prev = snapPrev.orders || [];
+
+  const curNums  = new Set(cur.map(o  => norm(o.orderNumber)));
+  const prevNums = new Set(prev.map(o => norm(o.orderNumber)));
+
+  const newOrders   = cur.filter(o  => !prevNums.has(norm(o.orderNumber)));
+  const cleared     = prev.filter(o => !curNums.has(norm(o.orderNumber)));
+  const stillOpen   = cur.filter(o  =>  prevNums.has(norm(o.orderNumber)));
+
+  const valChange = snapCur.totalValue - snapPrev.totalValue;
+  const valSign   = valChange >= 0 ? '+' : '';
+  const valColor  = valChange >= 0 ? 'green' : 'red';
+
+  el.innerHTML = `
+    <div class="section-title">🔍 Comparison</div>
+    <div class="section-sub"><strong>${esc(snapPrev.filename)}</strong> &rarr; <strong>${esc(snapCur.filename)}</strong></div>
+    <div class="stats-grid" style="margin-bottom:20px">
+      <div class="stat-card"><div class="stat-label">New Orders</div><div class="stat-val green">${newOrders.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Cleared</div><div class="stat-val red">${cleared.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Still Open</div><div class="stat-val blue">${stillOpen.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Value Change</div><div class="stat-val ${valColor}">${valSign}${fmtCur(valChange)}</div></div>
+    </div>
+    <div class="card">
+      <div class="ctabs">
+        <button class="ctab ${cmpTab==='new'?'active':''}"      onclick="switchCTab('new')">New Orders <span class="cbadge g">${newOrders.length}</span></button>
+        <button class="ctab ${cmpTab==='cleared'?'active':''}"  onclick="switchCTab('cleared')">Cleared <span class="cbadge r">${cleared.length}</span></button>
+        <button class="ctab ${cmpTab==='stillopen'?'active':''}" onclick="switchCTab('stillopen')">Still Open <span class="cbadge b">${stillOpen.length}</span></button>
+      </div>
+      <div class="cpanel ${cmpTab==='new'?'active':''}"      id="cpanel-new">${cmpTable(newOrders,'new')}</div>
+      <div class="cpanel ${cmpTab==='cleared'?'active':''}"  id="cpanel-cleared">${cmpTable(cleared,'cleared')}</div>
+      <div class="cpanel ${cmpTab==='stillopen'?'active':''}" id="cpanel-stillopen">${cmpTable(stillOpen,'stillopen')}</div>
+    </div>`;
+}
+
+function switchCTab(tab) {
+  cmpTab = tab;
+  document.querySelectorAll('.ctab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.cpanel').forEach(p => p.classList.remove('active'));
+  // re-render is cheaper here given dynamic content
+  renderCompare();
+}
+
+function cmpTable(orders, type) {
+  if (!orders.length) {
+    const msgs = { new:'No new orders added.', cleared:'No orders were cleared.', stillopen:'No orders carried over.' };
+    return `<div class="empty" style="padding:40px 20px"><div class="empty-icon">${type==='cleared'?'🎉':'📭'}</div><div>${msgs[type]}</div></div>`;
+  }
+  const total = orders.reduce((s,o)=>s+(parseFloat(o.orderValue)||0),0);
+  const trs = orders.map(o=>`
+    <tr>
+      <td><strong>${esc(o.orderNumber||'—')}</strong></td>
+      <td>${esc(o.customerName||'—')}</td>
+      <td>${esc(o.product||'—')}</td>
+      <td>${esc(String(o.quantity??'—'))}</td>
+      <td class="mono">${o.orderValue!=null?fmtCur(o.orderValue):'—'}</td>
+      <td>${fmtDateStr(o.orderDate)}</td>
+      <td class="${dueClass(o.dueDate)}">${fmtDateStr(o.dueDate)}</td>
+      <td>${statusBadge(o.status)}</td>
+      <td class="notes-cell" title="${esc(o.notes||'')}">${esc(o.notes||'—')}</td>
+    </tr>`).join('');
+
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <span style="font-size:13px;color:var(--muted)">${orders.length} order${orders.length!==1?'s':''} &nbsp;·&nbsp; Total: <strong style="color:var(--text)">${fmtCur(total)}</strong></span>
+      <button class="btn btn-green" onclick="exportCmpCSV('${type}')">⬇ Export CSV</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Order #</th><th>Customer</th><th>Product</th><th>Qty</th>
+          <th>Value</th><th>Order Date</th><th>Due Date</th><th>Status</th><th>Notes</th>
+        </tr></thead>
+        <tbody>${trs}</tbody>
+      </table>
+    </div>`;
+}
+
+// ─── EXPORT CSV ──────────────────────────────────────────
+function exportCSV(which) {
+  const snap = which === 'cur' ? snapCur : snapPrev;
+  if (!snap) return;
+  dlCSV(snap.orders, `backlog_${which==='cur'?'current':'previous'}_${fileDate()}.csv`);
+}
+
+function exportCmpCSV(type) {
+  if (!snapCur || !snapPrev) return;
+  const cur  = snapCur.orders  || [];
+  const prev = snapPrev.orders || [];
+  const curNums  = new Set(cur.map(o  => norm(o.orderNumber)));
+  const prevNums = new Set(prev.map(o => norm(o.orderNumber)));
+  let rows;
+  if (type==='new')       rows = cur.filter(o  => !prevNums.has(norm(o.orderNumber)));
+  else if(type==='cleared') rows = prev.filter(o => !curNums.has(norm(o.orderNumber)));
+  else                      rows = cur.filter(o  =>  prevNums.has(norm(o.orderNumber)));
+  dlCSV(rows, `backlog_${type}_${fileDate()}.csv`);
+}
+
+function dlCSV(orders, filename) {
+  const keys = ['orderNumber','customerName','product','quantity','orderValue','orderDate','dueDate','status','notes'];
+  const hdrs = ['Order Number','Customer Name','Product','Quantity','Order Value','Order Date','Due Date','Status','Notes'];
+  const rows = orders.map(o => keys.map(k => {
+    const v = String(o[k] ?? '');
+    return v.includes(',') || v.includes('"') || v.includes('\n') ? `"${v.replace(/"/g,'""')}"` : v;
+  }).join(','));
+  const csv = [hdrs.join(','), ...rows].join('\n');
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(new Blob([csv],{type:'text/csv'})),
+    download: filename
+  });
+  a.click();
+}
+
+// ─── HELPERS ─────────────────────────────────────────────
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function trunc(s,n) { return s&&s.length>n ? s.slice(0,n)+'…' : (s||''); }
+function norm(s) { return String(s||'').trim().toLowerCase(); }
+function fileDate() { return new Date().toISOString().slice(0,10); }
+
+function fmtCur(v) {
+  const n = parseFloat(v);
+  return isNaN(n) ? '—' : '$' + n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function fmtDate(d) {
+  if (!d||isNaN(d)) return '—';
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+}
+function fmtTime(d) {
+  if (!d||isNaN(d)) return '—';
+  return d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
+}
+function fmtDateStr(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  return isNaN(d) ? esc(String(s)) : fmtDate(d);
+}
+function dueClass(s) {
+  if (!s) return '';
+  const d = new Date(s); if (isNaN(d)) return '';
+  const days = (d - new Date()) / 86400000;
+  return days < 0 ? 'due-over' : days <= 7 ? 'due-soon' : 'due-ok';
+}
+function statusBadge(status) {
+  if (!status) return '<span class="badge b-default">—</span>';
+  const s = status.toLowerCase();
+  const cls = s.includes('overdue')?'b-overdue':s.includes('open')?'b-open':s.includes('pending')?'b-pending':(s.includes('complet')||s.includes('closed'))?'b-done':'b-default';
+  return `<span class="badge ${cls}">${esc(status)}</span>`;
+}
+</script>
+</body>
+</html>
