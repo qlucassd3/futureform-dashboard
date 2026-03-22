@@ -4295,9 +4295,9 @@ function renderDeptDashboard(dept) {
     } else {
       content += '<div class="bl-snap-bar stale">' +
         '<span style="color:var(--accent-yellow)">⚠ Showing static report from 3/20/2026.</span>' +
-        '<span style="color:var(--text-secondary);font-size:12px">Upload your latest PDF to see live data.</span>' +
+        '<span style="color:var(--text-secondary);font-size:12px">Upload your latest Excel or CSV report to see live data.</span>' +
         '<div style="flex:1"></div>' +
-        '<button class="btn btn-sm btn-primary" onclick="blSwitchOrdersTab(\'upload\')">📤 Upload PDF</button>' +
+        '<button class="btn btn-sm btn-primary" onclick="blSwitchOrdersTab(\'upload\')">📤 Upload Report</button>' +
       '</div>';
     }
 
@@ -4426,8 +4426,8 @@ function renderDeptDashboard(dept) {
       content += '<div class="bl-empty">' +
         '<div style="font-size:40px;margin-bottom:12px">🔍</div>' +
         '<div class="bl-empty-title">' + (!blSnapCur ? 'No snapshots yet' : 'Only one snapshot loaded') + '</div>' +
-        '<div style="color:var(--text-secondary);font-size:14px;margin-bottom:16px">Upload ' + (!blSnapCur ? 'two PDFs' : 'a second PDF') + ' to compare changes between reports.</div>' +
-        '<button class="btn btn-primary" onclick="blSwitchOrdersTab(\'upload\')">📤 Upload PDF</button>' +
+        '<div style="color:var(--text-secondary);font-size:14px;margin-bottom:16px">Upload ' + (!blSnapCur ? 'two reports' : 'a second report') + ' to compare changes between reports.</div>' +
+        '<button class="btn btn-primary" onclick="blSwitchOrdersTab(\'upload\')">📤 Upload Report</button>' +
       '</div>';
     } else {
       var _co = blSnapCur.orders || [], _po = blSnapPrev.orders || [];
@@ -7903,8 +7903,8 @@ function blBuildUI(activeTab, apiKey) {
 }
 
 function blUploadHtml() {
-  return '<div class="bl-section-title">Upload Backlog PDF</div>' +
-    '<div class="bl-section-sub">AI reads your PDF and extracts all order data automatically. Current snapshot shifts to Previous on each new upload.</div>' +
+  return '<div class="bl-section-title">Upload Backlog Report</div>' +
+    '<div class="bl-section-sub">Upload an Excel or CSV export of your open orders report. Current snapshot shifts to Previous on each new upload.</div>' +
     '<div class="bl-upload-grid">' +
       '<div>' +
         '<div class="bl-dropzone" id="blDropzone" onclick="document.getElementById(\'blFileInput\').click()" ondrop="blOnDrop(event)" ondragover="blOnDragOver(event)" ondragleave="blOnDragLeave(event)">' +
@@ -8194,7 +8194,7 @@ function blRenderBacklog(which) {
   if (!snap) {
     el.innerHTML = '<div class="bl-empty"><div style="font-size:40px;margin-bottom:12px">' + icon + '</div>' +
       '<div class="bl-empty-title">No ' + label.toLowerCase() + ' snapshot</div>' +
-      '<div>Upload a PDF on the Upload tab to load data.</div></div>';
+      '<div>Upload an Excel or CSV on the Upload tab to load data.</div></div>';
     return;
   }
 
@@ -8267,11 +8267,11 @@ function blRenderCompare() {
   if (!el) return;
 
   if (!blSnapCur && !blSnapPrev) {
-    el.innerHTML = '<div class="bl-empty"><div style="font-size:40px;margin-bottom:12px">🔍</div><div class="bl-empty-title">No snapshots to compare</div><div>Upload at least two PDFs to enable comparison.</div></div>';
+    el.innerHTML = '<div class="bl-empty"><div style="font-size:40px;margin-bottom:12px">🔍</div><div class="bl-empty-title">No snapshots to compare</div><div>Upload at least two reports to enable comparison.</div></div>';
     return;
   }
   if (!blSnapPrev) {
-    el.innerHTML = '<div class="bl-empty"><div style="font-size:40px;margin-bottom:12px">🔍</div><div class="bl-empty-title">Only one snapshot loaded</div><div>Upload a second PDF to compare with the current snapshot.</div></div>';
+    el.innerHTML = '<div class="bl-empty"><div style="font-size:40px;margin-bottom:12px">🔍</div><div class="bl-empty-title">Only one snapshot loaded</div><div>Upload a second report to compare with the current snapshot.</div></div>';
     return;
   }
 
