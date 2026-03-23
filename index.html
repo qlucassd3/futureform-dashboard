@@ -5980,7 +5980,7 @@ function deleteProject(id) {
   }
 }
 
-function _executeDeleteProject(id) {
+window._executeDeleteProject = function _executeDeleteProject(id) {
   var proj = state.projects.find(function(p){ return p.id === id; });
   var label = (proj && proj.title) ? proj.title : id;
 
@@ -5995,7 +5995,7 @@ function _executeDeleteProject(id) {
 
   // Always return to the main home page after deletion
   navHome();
-}
+};
 
 function archiveProject(id) {
   var p = state.projects.find(function(x) { return x.id === id; });
@@ -7927,19 +7927,19 @@ window.mDrillDept=function(dept){closeMgmt();if(typeof navDept==='function')navD
 </div>
 
 <script>
-var _pendingDeleteId = null;
 function openDeleteConfirm(id, label) {
-  _pendingDeleteId = id;
   document.getElementById('deleteConfirmMsg').textContent = 'Delete "' + label + '"? This cannot be undone.';
   document.getElementById('deleteConfirmBtn').onclick = function() {
-    closeDeleteConfirm();
-    _executeDeleteProject(_pendingDeleteId);
+    // Capture id in closure BEFORE closing modal — closing does NOT affect id here
+    document.getElementById('deleteConfirmModal').classList.remove('open');
+    if (typeof window._executeDeleteProject === 'function') {
+      window._executeDeleteProject(id);
+    }
   };
   document.getElementById('deleteConfirmModal').classList.add('open');
 }
 function closeDeleteConfirm() {
   document.getElementById('deleteConfirmModal').classList.remove('open');
-  _pendingDeleteId = null;
 }
 </script>
 
