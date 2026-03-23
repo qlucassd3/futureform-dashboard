@@ -5951,19 +5951,35 @@ function deleteContact(id) {
 }
 
 function deleteProject(id) {
-  if (!confirm(`Delete project ${id}? This cannot be undone.`)) return;
-  state.projects = state.projects.filter(p => p.id !== id);
+  var proj = state.projects.find(function(p){ return p.id === id; });
+  var label = (proj && proj.title) ? proj.title : id;
+  if (!confirm('Delete "' + label + '"?\n\nThis cannot be undone.')) return;
+
+  // Save where we came from BEFORE mutating state or navigating
+  var returnDept = _prevContext && _prevContext.dept ? _prevContext.dept : currentDept;
+  var returnTab  = _prevContext && _prevContext.tab  ? _prevContext.tab  : (currentDeptTab || 'overview');
+  var inDetail   = (function(){
+    var vd = document.getElementById('view-detail');
+    return vd && vd.classList.contains('active');
+  })();
+
+  // Delete from state and persist
+  state.projects = state.projects.filter(function(p){ return p.id !== id; });
+  state.currentProjectId = null;
+  _prevContext = null;
   save();
-  toast('Project deleted.', 'info');
-  if (document.getElementById('view-detail').classList.contains('active')) {
-    goBack();
+  toast('"' + label + '" deleted.', 'info');
+
+  // Navigate back
+  if (returnDept && typeof DEPTS !== 'undefined' && DEPTS[returnDept]) {
+    currentDeptTab = returnTab;
+    navDept(returnDept);
+    // Sync tab highlight
+    document.querySelectorAll('.dept-tab').forEach(function(t){
+      t.classList.toggle('active', t.dataset.tab === returnTab);
+    });
   } else {
-    // Refresh whichever view is currently active
-    var active = document.querySelector('.view.active');
-    if (active) {
-      if (active.id === 'view-home') renderHome();
-      else if (active.id === 'view-dept' && currentDept) renderDeptDashboard(currentDept);
-    }
+    navHome();
   }
 }
 
