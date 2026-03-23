@@ -5972,24 +5972,25 @@ function deleteContact(id) {
 function deleteProject(id) {
   var proj = state.projects.find(function(p){ return p.id === id; });
   var label = (proj && proj.title) ? proj.title : id;
-  if (!confirm('Delete "' + label + '"?\n\nThis cannot be undone.')) return;
+  // Use custom modal instead of native confirm() which Chrome can suppress
+  if (typeof openDeleteConfirm === 'function') {
+    openDeleteConfirm(id, label);
+  } else {
+    _executeDeleteProject(id); // fallback
+  }
+}
 
-  // Save where we came from BEFORE mutating state or navigating
-  var returnDept = _prevContext && _prevContext.dept ? _prevContext.dept : currentDept;
-  var returnTab  = _prevContext && _prevContext.tab  ? _prevContext.tab  : (currentDeptTab || 'overview');
-  var inDetail   = (function(){
-    var vd = document.getElementById('view-detail');
-    return vd && vd.classList.contains('active');
-  })();
+function _executeDeleteProject(id) {
+  var proj = state.projects.find(function(p){ return p.id === id; });
+  var label = (proj && proj.title) ? proj.title : id;
 
   // Delete from state and persist
   state.projects = state.projects.filter(function(p){ return p.id !== id; });
   state.currentProjectId = null;
   _prevContext = null;
   // Save locally and push to Supabase immediately (not debounced)
-  // so the delete can't be overwritten by a page reload before the push fires
   localStorage.setItem('mfg_ci_dashboard', JSON.stringify(state));
-  _pushStateToSb(); // immediate, not debounced
+  _pushStateToSb();
   toast('"' + label + '" deleted.', 'info');
 
   // Always return to the main home page after deletion
@@ -7908,6 +7909,39 @@ window.mDrillDept=function(dept){closeMgmt();if(typeof navDept==='function')navD
 })();
 </script>
 </div><!-- /#mgmt-app -->
+
+<!-- ═══ DELETE CONFIRM MODAL ═══ -->
+<div class="modal-overlay" id="deleteConfirmModal" style="z-index:9999">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header" style="border-bottom:1px solid var(--border);padding:20px 24px 16px">
+      <h3 style="margin:0;font-size:17px;color:var(--text-primary)">🗑 Delete Project</h3>
+    </div>
+    <div style="padding:20px 24px">
+      <p id="deleteConfirmMsg" style="margin:0 0 20px;color:var(--text-secondary);font-size:14px;line-height:1.6"></p>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="closeDeleteConfirm()">Cancel</button>
+        <button class="btn btn-danger" id="deleteConfirmBtn">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var _pendingDeleteId = null;
+function openDeleteConfirm(id, label) {
+  _pendingDeleteId = id;
+  document.getElementById('deleteConfirmMsg').textContent = 'Delete "' + label + '"? This cannot be undone.';
+  document.getElementById('deleteConfirmBtn').onclick = function() {
+    closeDeleteConfirm();
+    _executeDeleteProject(_pendingDeleteId);
+  };
+  document.getElementById('deleteConfirmModal').classList.add('open');
+}
+function closeDeleteConfirm() {
+  document.getElementById('deleteConfirmModal').classList.remove('open');
+  _pendingDeleteId = null;
+}
+</script>
 
 <!-- ═══ SALES BACKLOG MODULE ═══ -->
 <script>
