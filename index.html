@@ -5992,17 +5992,8 @@ function deleteProject(id) {
   _pushStateToSb(); // immediate, not debounced
   toast('"' + label + '" deleted.', 'info');
 
-  // Navigate back
-  if (returnDept && typeof DEPTS !== 'undefined' && DEPTS[returnDept]) {
-    currentDeptTab = returnTab;
-    navDept(returnDept);
-    // Sync tab highlight
-    document.querySelectorAll('.dept-tab').forEach(function(t){
-      t.classList.toggle('active', t.dataset.tab === returnTab);
-    });
-  } else {
-    navHome();
-  }
+  // Always return to the main home page after deletion
+  navHome();
 }
 
 function archiveProject(id) {
