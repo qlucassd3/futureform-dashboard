@@ -2517,28 +2517,41 @@
 
   window.authSaveProfile = function () {
     clearErr('err-prof');
-    var username = localStorage.getItem('current_user'); if (!username) return;
+    var username = localStorage.getItem('current_user');
+    if (!username) { showApp(); return; }
     var p = window.getProfile(); // existing profile for photo fallback
 
-    var profile = {
-      fullName:        document.getElementById('p-name').value.trim(),
-      email:           document.getElementById('p-email').value.trim(),
-      phone:           document.getElementById('p-phone').value.trim(),
-      department:      document.getElementById('p-dept').value,
-      role:            document.getElementById('p-role').value.trim(),
-      supervisorName:  document.getElementById('p-super').value.trim(),
-      defaultPriority: document.getElementById('p-priority').value,
-      defaultTeam:     document.getElementById('p-team').value.trim(),
-      photo:           pendingPhoto !== null ? pendingPhoto : (p && p.photo ? p.photo : null),
-      theme:           document.getElementById('p-theme-toggle').checked ? 'light' : 'dark'
-    };
+    try {
+      var themeToggleEl = document.getElementById('p-theme-toggle');
+      var profile = {
+        fullName:        (document.getElementById('p-name')     || {}).value || '',
+        email:           (document.getElementById('p-email')    || {}).value || '',
+        phone:           (document.getElementById('p-phone')    || {}).value || '',
+        department:      (document.getElementById('p-dept')     || {}).value || '',
+        role:            (document.getElementById('p-role')     || {}).value || '',
+        supervisorName:  (document.getElementById('p-super')    || {}).value || '',
+        defaultPriority: (document.getElementById('p-priority') || {}).value || '',
+        defaultTeam:     (document.getElementById('p-team')     || {}).value || '',
+        photo:           pendingPhoto !== null ? pendingPhoto : (p && p.photo ? p.photo : null),
+        theme:           themeToggleEl && themeToggleEl.checked ? 'light' : 'dark'
+      };
+      profile.fullName        = profile.fullName.trim();
+      profile.email           = profile.email.trim();
+      profile.phone           = profile.phone.trim();
+      profile.role            = profile.role.trim();
+      profile.supervisorName  = profile.supervisorName.trim();
+      profile.defaultTeam     = profile.defaultTeam.trim();
 
-    localStorage.setItem('profile_' + username, JSON.stringify(profile));
-    _pushProfileToSb(username, profile); // sync to Supabase
-    syncProfileToContacts(username, profile);
-    refreshProfileHeader();
-    applyTheme(profile);
-    showOk('ok-prof', '✓ Profile saved!');
+      localStorage.setItem('profile_' + username, JSON.stringify(profile));
+      try { _pushProfileToSb(username, profile); } catch(e) {}
+      try { syncProfileToContacts(username, profile); } catch(e) {}
+      try { refreshProfileHeader(); } catch(e) {}
+      try { applyTheme(profile); } catch(e) {}
+      showOk('ok-prof', '✓ Profile saved!');
+    } catch(e) {
+      console.error('authSaveProfile error:', e);
+    }
+    // Always close the profile screen after saving
     setTimeout(showApp, 900);
   };
 
