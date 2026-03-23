@@ -3713,16 +3713,35 @@ function _applyMigrations() {
 
 function load() {
   // Load from localStorage first (instant, works offline)
+  var raw = null;
   try {
-    const raw = localStorage.getItem('mfg_ci_dashboard');
+    raw = localStorage.getItem('mfg_ci_dashboard');
     if (raw) { const loaded = JSON.parse(raw); state.projects = loaded.projects || []; state.contacts = loaded.contacts || []; }
   } catch(e) {}
-  if (!state.projects.length) seedData();
+  // Only seed on a truly first-ever load (no saved state at all).
+  // If the user deliberately deleted all projects, raw will exist with projects:[]
+  // and we must NOT re-seed.
+  if (!raw) { seedData(); save(); }
   _applyMigrations();
 
   // Then pull fresh data from Supabase in background and refresh UI
+  var _localHadData = !!raw; // true if user has been here before (even if they deleted all projects)
   _pullStateFromSb().then(function(pulled) {
     if (pulled) {
+      // If local had an existing (possibly empty) saved state, don't let Supabase
+      // resurrect seed projects the user already deleted.
+      // Seed projects all have IDs starting with "CI-00".
+      if (_localHadData && state.projects.length > 0) {
+        var allSeed = state.projects.every(function(p){ return /^CI-00/.test(p.id); });
+        var localProjects = [];
+        try { localProjects = JSON.parse(raw).projects || []; } catch(e) {}
+        // If Supabase returned only seed data but local was deliberately empty, trust local
+        if (allSeed && localProjects.length === 0) {
+          state.projects = [];
+          localStorage.setItem('mfg_ci_dashboard', JSON.stringify(state));
+          _pushStateToSb(); // push the empty state back to Supabase to fix it there too
+        }
+      }
       _applyMigrations();
       if (typeof renderHome === 'function') renderHome();
       if (typeof window._currentDetailId !== 'undefined' && window._currentDetailId) {
@@ -5967,7 +5986,10 @@ function deleteProject(id) {
   state.projects = state.projects.filter(function(p){ return p.id !== id; });
   state.currentProjectId = null;
   _prevContext = null;
-  save();
+  // Save locally and push to Supabase immediately (not debounced)
+  // so the delete can't be overwritten by a page reload before the push fires
+  localStorage.setItem('mfg_ci_dashboard', JSON.stringify(state));
+  _pushStateToSb(); // immediate, not debounced
   toast('"' + label + '" deleted.', 'info');
 
   // Navigate back
